@@ -138,7 +138,7 @@ function LogoText({ phase }: { phase: SharedValue<number> }) {  // ✅ Fix 1
   return (
     <Animated.View style={[{ position: 'absolute', alignItems: 'center' }, style]}>
       <Text style={{ fontSize: 58, fontWeight: '900', color: '#EEF0E8', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -3 }}>
-        rydo
+        ridzo
       </Text>
       <View style={{ width: 36, height: 2.5, backgroundColor: '#BEFF00', borderRadius: 2, marginTop: 4 }} />
       <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontFamily: 'Outfit_400Regular', letterSpacing: 4, marginTop: 7, textTransform: 'uppercase' }}>
