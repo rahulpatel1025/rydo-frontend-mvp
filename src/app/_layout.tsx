@@ -40,6 +40,7 @@ export default function RootLayout() {
       <StatusBar style="light" backgroundColor="#06090A" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#06090A' } }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="intro" options={{ animation: 'none' }} />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
       </Stack>
