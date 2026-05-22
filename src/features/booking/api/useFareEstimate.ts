@@ -138,7 +138,7 @@ export function useFareEstimate(
         },
       };
     },
-    enabled: !!pickup && !!drop,
+    enabled: true,
   });
 }
 
