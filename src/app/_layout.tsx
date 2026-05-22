@@ -1,6 +1,5 @@
-// src/app/_layout.tsx
 import { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments, Slot } from 'expo-router';
 import { useFonts } from 'expo-font';
 import {
   Outfit_400Regular,
@@ -12,11 +11,42 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
+import { AuthProvider, useAuth } from '../lib/auth-context'; // Ensure this path is correct
 import "../../global.css";
 
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
+
+// This component handles the redirection logic
+function RootLayoutNav() {
+  const { session, isLoading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    const inAuthGroup = segments[0] === '(auth)';
+
+    if (!session && !inAuthGroup) {
+      // If not logged in and not already in (auth), send to login
+      router.replace('/(auth)/phone' as any); 
+    } else if (session && inAuthGroup) {
+      // If logged in and in (auth), send to home
+      router.replace('/(tabs)/' as any); 
+    }
+  }, [session, segments, isLoading]);
+
+  return (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#06090A' } }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="intro" options={{ animation: 'none' }} />
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="(tabs)" />
+    </Stack>
+  );
+}
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
@@ -36,14 +66,11 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <StatusBar style="light" backgroundColor="#06090A" />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#06090A' } }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="intro" options={{ animation: 'none' }} />
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(tabs)" />
-      </Stack>
-    </QueryClientProvider>
+    <AuthProvider>
+      <QueryClientProvider client={queryClient}>
+        <StatusBar style="light" backgroundColor="#06090A" />
+        <RootLayoutNav />
+      </QueryClientProvider>
+    </AuthProvider>
   );
 }

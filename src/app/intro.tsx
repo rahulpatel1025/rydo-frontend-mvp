@@ -111,7 +111,7 @@ export default function IntroScreen() {
       toValue: 0, duration: 400, delay: 600, useNativeDriver: true,
     });
 
-    // ── Full sequence ─────────────────────────────────────────────────────────
+  // ── Full sequence ─────────────────────────────────────────────────────────
     Animated.sequence([
       Animated.parallel(assembleAnims),
       ringIn,
@@ -123,8 +123,11 @@ export default function IntroScreen() {
       ]),
       logoOut,
     ]).start(() => {
-      // ✅ FIX: Navigate to the root of the auth folder, which loads index.tsx (The Welcome Screen)
-      router.replace('/(auth)/' as any);
+      // ✅ FIX: Delay the navigation by 0ms to move it to the end of the JS event queue,
+      // allowing Expo Router to finish its mounting process.
+      setTimeout(() => {
+        router.replace('/(auth)/' as any);
+      }, 0);
     });
   }, []);
 

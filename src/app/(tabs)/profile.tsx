@@ -1,11 +1,13 @@
 // src/app/(tabs)/profile.tsx
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useUserProfile } from '../../features/auth/api/useUserProfile';
 import { StarIcon, WalletIcon, PinIcon, BellIcon, HelpIcon } from '../../components/ui/Icons';
+import { useAuth } from '../../lib/auth-context'; // Import your auth hook
 
 export default function ProfileScreen() {
   const { data, isLoading } = useUserProfile();
+  const { signOut } = useAuth(); // Destructure signOut
 
   if (isLoading || !data) {
     return (
@@ -15,7 +17,13 @@ export default function ProfileScreen() {
     );
   }
 
-  // Notice Refer & Earn is gone
+  const handleLogout = () => {
+    Alert.alert("Log Out", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Log Out", style: "destructive", onPress: () => signOut() }
+    ]);
+  };
+
   const menuSections = [
     [ { icon: <WalletIcon />, label: 'Payment Methods' }, { icon: <PinIcon />, label: 'Saved Addresses' } ],
     [ { icon: <BellIcon />, label: 'Notifications' }, { icon: <HelpIcon />, label: 'Help & Support' } ],
@@ -56,6 +64,14 @@ export default function ProfileScreen() {
             ))}
           </View>
         ))}
+
+        {/* Logout Section */}
+        <TouchableOpacity 
+          onPress={handleLogout}
+          style={{ marginHorizontal: 14, marginTop: 20, marginBottom: 40, backgroundColor: 'rgba(255, 69, 58, 0.08)', borderRadius: 19, padding: 16, alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(255, 69, 58, 0.2)' }}
+        >
+          <Text style={{ fontSize: 14, fontWeight: '700', color: '#FF453A', fontFamily: 'Outfit_700Bold' }}>Log Out</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );

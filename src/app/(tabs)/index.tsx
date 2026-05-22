@@ -1,19 +1,41 @@
 // src/app/(tabs)/index.tsx
-import { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import MapView, { PROVIDER_DEFAULT } from 'react-native-maps';
+import * as Location from 'expo-location';
 
 // Imports from our cleanly separated architecture
 import { useHomeData, VehicleType } from '../../features/booking/api/useHomeData';
-import { SearchIcon, PlusIcon, BikeIcon, AutoIcon, SharedAutoIcon, MapPreview } from '../../components/ui/Icons';
+import { SearchIcon, PlusIcon, BikeIcon, AutoIcon, SharedAutoIcon } from '../../components/ui/Icons';
 
 export default function HomeScreen() {
   const router = useRouter();
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleType>('bike');
+  const [region, setRegion] = useState({
+    latitude: 20.2760,
+    longitude: 73.0084,
+    latitudeDelta: 0.01,
+    longitudeDelta: 0.01,
+  });
   
   // Fetch the data from our React Query hook
   const { data, isLoading, isError } = useHomeData();
+
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        let location = await Location.getCurrentPositionAsync({});
+        setRegion({
+          ...region,
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+      }
+    })();
+  }, []);
 
   const tagColors = {
     primary: { bg: 'rgba(190,255,0,0.1)',  text: '#BEFF00' },
@@ -74,9 +96,16 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── Map Preview ── */}
-        <View style={{ marginHorizontal: 14, marginTop: 11, borderRadius: 18, overflow: 'hidden', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)' }}>
-          <MapPreview />
+        {/* ── Live Map Preview Block ── */}
+        <View style={{ marginHorizontal: 14, marginTop: 11, borderRadius: 18, overflow: 'hidden', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', height: 200 }}>
+          <MapView 
+            provider={PROVIDER_DEFAULT} 
+            style={{ flex: 1 }} 
+            region={region} 
+            showsUserLocation={true}
+            scrollEnabled={false} // Prevents the map from scrolling when the user is trying to scroll the page
+            zoomEnabled={false}
+          />
         </View>
 
         {/* ── Quick Routes (Dynamic) ── */}

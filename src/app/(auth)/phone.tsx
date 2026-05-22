@@ -1,20 +1,36 @@
 // src/app/(auth)/phone.tsx
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { UserAuthAPI } from '@/features/auth/api/userAuthAPI'; // Ensure this path matches your setup
 
 export default function PhoneScreen() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleContinue = () => {
-    // TODO (Week 2): Trigger Axios call to intern's /send-otp endpoint here.
-    // For now, we simulate success and pass the phone number to the verify screen.
-    router.push({ 
-      pathname: '/(auth)/verify', 
-      params: { phone: `+91 ${phone}` } 
-    });
+  const handleContinue = async () => {
+    if (phone.length !== 10) return;
+
+    setIsLoading(true);
+    try {
+      // Trigger the real Axios call to your intern's /send-otp endpoint!
+      await UserAuthAPI.sendOtp(phone);
+      
+      // Navigate to verify screen, passing JUST the 10 digits 
+      // (The API expects the country code and phone separated or handles it natively)
+      router.push({ 
+        pathname: '/(auth)/verify', 
+        params: { phone } 
+      });
+    } catch (error: any) {
+      // Catch backend errors (like rate limits) and show a clean alert
+      const errorMsg = error.response?.data?.message || "Failed to send OTP. Please try again.";
+      Alert.alert("Error", errorMsg);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -42,13 +58,14 @@ export default function PhoneScreen() {
               value={phone}
               onChangeText={(text) => setPhone(text.replace(/[^0-9]/g, ''))}
               autoFocus
+              editable={!isLoading}
             />
           </View>
 
           <View style={{ flex: 1 }} />
 
           <TouchableOpacity
-            disabled={phone.length < 10}
+            disabled={phone.length < 10 || isLoading}
             onPress={handleContinue}
             style={{
               backgroundColor: phone.length === 10 ? '#BEFF00' : 'rgba(190,255,0,0.1)',
@@ -56,10 +73,11 @@ export default function PhoneScreen() {
               paddingVertical: 18,
               alignItems: 'center',
               marginBottom: 20,
+              opacity: isLoading ? 0.7 : 1, // Slight dim while loading
             }}
           >
             <Text style={{ fontSize: 16, fontWeight: '800', color: phone.length === 10 ? '#060A07' : 'rgba(255,255,255,0.3)', fontFamily: 'Outfit_800ExtraBold' }}>
-              Continue
+              {isLoading ? 'Sending OTP...' : 'Continue'}
             </Text>
           </TouchableOpacity>
 

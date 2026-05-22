@@ -1,11 +1,36 @@
+// src/lib/apiClient.ts
 import axios from 'axios';
-import MockAdapter from 'axios-mock-adapter';
+import * as SecureStore from 'expo-secure-store';
 
-const USE_MOCKS = true; // Toggle this to false when backend is ready
+// ── Update this whenever ngrok restarts ──────────────────────────────────────
+export const NGROK_URL = 'https://caddy-kinsman-reanalyze.ngrok-free.dev';
 
 export const apiClient = axios.create({
-  baseURL: 'https://api.rydo.com/v1',
+  baseURL: `${NGROK_URL}/api`,
   timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
+  },
 });
 
-export const mock = USE_MOCKS ? new MockAdapter(apiClient, { delayResponse: 800 }) : null;
+// ── Attach JWT token to every request automatically ───────────────────────────
+apiClient.interceptors.request.use(async (config) => {
+  const token = await SecureStore.getItemAsync('userToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// ── Handle 401 — token expired ────────────────────────────────────────────────
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401) {
+      await SecureStore.deleteItemAsync('userToken');
+      await SecureStore.deleteItemAsync('refreshToken');
+    }
+    return Promise.reject(error);
+  }
+);
