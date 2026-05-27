@@ -1,8 +1,7 @@
-// src/app/(tabs)/book.tsx
 import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, Pressable,
-  ActivityIndicator, StyleSheet, TextInput, FlatList,
+  ActivityIndicator, StyleSheet, TextInput, FlatList, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -12,7 +11,7 @@ import { Svg, Path, Circle } from 'react-native-svg';
 import { useFareEstimate, VehicleType } from '../../features/booking/api/useFareEstimate';
 import { SearchIcon } from '../../components/ui/Icons';
 
-// ── Inline icons (removes dependency on PinIcon props issue) ──────────────────
+// ── Inline icons ──────────────────────────────────────────────────────────────
 const BackIcon = () => (
   <Svg width={16} height={12} viewBox="0 0 16 12" fill="none">
     <Path d="M14 6H2M2 6L7 1M2 6L7 11" stroke="rgba(255,255,255,0.8)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
@@ -25,7 +24,6 @@ const SwapIcon = () => (
   </Svg>
 );
 
-// PinIcon with explicit color prop — no dependency on Icons.tsx
 const PinIcon = ({ color = '#BEFF00' }: { color?: string }) => (
   <Svg width={38} height={38} viewBox="0 0 24 24" fill="none">
     <Path
@@ -78,6 +76,8 @@ export default function BookScreen() {
   const [searchQuery, setSearchQuery]     = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [mapMoving, setMapMoving]         = useState(false);
+  const [isBooking, setIsBooking]         = useState(false);
+  
   const [pickup, setPickup]               = useState<LocationData | null>(null);
   const [dropoff, setDropoff]             = useState<LocationData | null>(null);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleType>('bike');
@@ -158,6 +158,41 @@ export default function BookScreen() {
     else { router.back(); }
   };
 
+  const handleConfirmRide = async () => {
+    if (!pickup || !dropoff) return;
+    
+    setIsBooking(true);
+    try {
+      // Build the payload matching the new Swagger YAML RideRequest schema
+      const payload = {
+        pickup: { 
+          address: pickup.address, 
+          location: { lat: pickup.latitude, lng: pickup.longitude } 
+        },
+        drop: { 
+          address: dropoff.address, 
+          location: { lat: dropoff.latitude, lng: dropoff.longitude } 
+        },
+        // Map shared_auto to AUTO enum, normal vehicles just uppercase
+        ride_type: selectedVehicle === 'shared_auto' ? 'AUTO' : selectedVehicle.toUpperCase(),
+        is_rideshare: selectedVehicle === 'shared_auto',
+        payment_method: 'UPI' 
+      };
+
+      console.log('[RideRequest Payload]:', JSON.stringify(payload, null, 2));
+      
+      // TODO: Replace this timeout with your actual API call -> await UserRideAPI.bookRide(payload);
+      await new Promise(resolve => setTimeout(resolve, 800)); 
+
+      router.push('/(tabs)/track');
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Booking Error', 'Could not process the ride request at this time.');
+    } finally {
+      setIsBooking(false);
+    }
+  };
+
   if (isFareLoading || !fareData) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A', justifyContent: 'center', alignItems: 'center' }}>
@@ -169,9 +204,9 @@ export default function BookScreen() {
   const activeFare = fareData.fares[selectedVehicle];
 
   const fareRows = [
-    { label: 'Base fare (incl. 2 km)',                                                                  value: `₹${activeFare.base}` },
+    { label: 'Base fare (incl. 2 km)',                                                                    value: `₹${activeFare.base}` },
     { label: selectedVehicle === 'shared_auto' ? 'Per seat / km' : `Distance (${activeFare.chargeableKm} km × ₹${activeFare.perKmRate})`, value: `₹${activeFare.distFare}` },
-    { label: 'Platform fee (12%)',                                                                       value: `₹${activeFare.platformFee}` },
+    { label: 'Platform fee (12%)',                                                                        value: `₹${activeFare.platformFee}` },
     ...(activeFare.nightSurcharge > 0 ? [{ label: 'Night surcharge (10%)', value: `₹${activeFare.nightSurcharge}` }] : []),
     ...(activeFare.waitingFare    > 0 ? [{ label: 'Waiting charge',        value: `₹${activeFare.waitingFare}`    }] : []),
   ];
@@ -387,10 +422,15 @@ export default function BookScreen() {
 
               {/* Confirm */}
               <TouchableOpacity
-                onPress={() => router.push('/(tabs)/track')}
-                style={styles.actionBtn}
+                onPress={handleConfirmRide}
+                disabled={isBooking}
+                style={[styles.actionBtn, isBooking && { opacity: 0.6 }]}
               >
-                <Text style={styles.actionBtnText}>Confirm Ride</Text>
+                {isBooking ? (
+                  <ActivityIndicator color="#060A07" />
+                ) : (
+                  <Text style={styles.actionBtnText}>Confirm Ride</Text>
+                )}
               </TouchableOpacity>
             </ScrollView>
           )}

@@ -1,13 +1,14 @@
-// src/features/booking/api/useFareEstimate.ts
 import { useQuery } from '@tanstack/react-query';
 
 export type VehicleType = 'bike' | 'auto' | 'shared_auto';
 
+// Updated to align with the backend's new PassengerFareBreakdown multi-tenant schema
 export interface FareBreakdown {
   base: number;
   includedKm: number;
   chargeableKm: number;
-  perKmRate: number;
+  perKmRate: number;          // The standard solo rate (e.g., ₹16 for Auto)
+  sharedPerKmRate?: number;   // The discounted shared rate (e.g., ₹3.50 for Shared Auto)
   distFare: number;
   waitingFare: number;
   nightSurcharge: number;
@@ -15,7 +16,7 @@ export interface FareBreakdown {
   tds: number;
   platformFee: number;
   netToDriver: number;
-  total: number;             // what passenger pays
+  total: number;              // What the passenger actually pays
   isLaunchRate: boolean;
 }
 
@@ -28,19 +29,19 @@ export interface FareEstimate {
 
 // ── Fare constants from RIDO Fare Policy v2.0 ─────────────────────────────────
 const FARE_POLICY = {
-  base_fare:          10,    // ₹10 all verticals
-  included_km:         2,    // 2 km included in base fare
-  waiting_per_min:     2,    // ₹2/min after 2 min free
-  night_surcharge_pct: 0.10, // 10% between 10PM–6AM
-  platform_commission: 0.12, // 12% of gross fare
-  tds_rate:            0.01, // 1% TDS (Section 194-O)
-  min_fare:           10,    // ₹10 minimum billable
+  base_fare:           10,    // ₹10 all verticals
+  included_km:          2,    // 2 km included in base fare
+  waiting_per_min:      2,    // ₹2/min after 2 min free
+  night_surcharge_pct: 0.10,  // 10% between 10PM–6AM
+  platform_commission: 0.12,  // 12% of gross fare
+  tds_rate:             0.01, // 1% TDS (Section 194-O)
+  min_fare:            10,    // ₹10 minimum billable
 
   // Launch discount rates (default for first 90 days)
   launch: {
     bike:        4,    // ₹4/km
     auto:       12,    // ₹12/km
-    shared_auto: 3.5,  // ₹3.5/seat/km (no launch discount — same as standard)
+    shared_auto: 3.5,  // ₹3.5/seat/km (Shared rides maintain strict multi-tenant margins)
   },
 
   // Standard rates (post-launch)
@@ -61,14 +62,21 @@ function calcFare(
   isNight: boolean = false,
 ): FareBreakdown {
   const rates = USE_LAUNCH_RATES ? FARE_POLICY.launch : FARE_POLICY.standard;
-  const perKmRate = rates[vehicleType];
+  
+  // ── Multi-Tenant Logic: Isolate solo rate from shared rate ──
+  const isShared = vehicleType === 'shared_auto';
+  const soloPerKmRate = isShared ? rates.auto : rates[vehicleType];
+  const sharedPerKmRate = isShared ? rates.shared_auto : undefined;
+  
+  // The rate actually applied to the distance math
+  const appliedRate = isShared ? sharedPerKmRate! : soloPerKmRate;
 
   const chargeableKm = Math.max(0, distanceKm - FARE_POLICY.included_km);
-  const distFare     = Math.round(chargeableKm * perKmRate * 100) / 100;
+  const distFare     = Math.round(chargeableKm * appliedRate * 100) / 100;
 
-  // Waiting charge — shared auto has no waiting charge
+  // Waiting charge — shared autos operate on strict timelines, no passenger waiting charge
   const freeMinutes  = 2;
-  const billableWait = vehicleType === 'shared_auto'
+  const billableWait = isShared
     ? 0
     : Math.max(0, waitingMinutes - freeMinutes);
   const waitingFare  = billableWait * FARE_POLICY.waiting_per_min;
@@ -92,7 +100,8 @@ function calcFare(
     base:          FARE_POLICY.base_fare,
     includedKm:    FARE_POLICY.included_km,
     chargeableKm:  Math.round(chargeableKm * 10) / 10,
-    perKmRate,
+    perKmRate:     soloPerKmRate,       // Always returns the solo rate for baseline UI math
+    sharedPerKmRate,                    // Included if this is a shared/pooled ride
     distFare,
     waitingFare,
     nightSurcharge,
@@ -100,7 +109,7 @@ function calcFare(
     tds,
     platformFee:   Math.round(platformFee),
     netToDriver:   Math.round(netToDriver),
-    total:         grossFare,    // passenger pays gross fare
+    total:         grossFare,           // Passenger pays gross fare
     isLaunchRate:  USE_LAUNCH_RATES,
   };
 }
@@ -115,9 +124,9 @@ export function useFareEstimate(
   return useQuery({
     queryKey: ['fareEstimate', pickup?.lat, pickup?.lng, drop?.lat, drop?.lng, distanceKm],
     queryFn: async (): Promise<FareEstimate> => {
-      // TODO: replace distanceKm with real value from Google Maps / OSRM
+      // TODO: replace distanceKm with real value from Google Maps / OSRM once integrated
       const km  = distanceKm ?? 20;   // fallback 20km (Silvassa→Vapi default)
-      const dur = durationMinutes ?? Math.round(km * 1.4); // rough estimate
+      const dur = durationMinutes ?? Math.round(km * 1.4); // rough time estimate
 
       const isNight = (() => {
         const h = new Date().getHours();
