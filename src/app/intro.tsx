@@ -188,7 +188,7 @@ export default function IntroScreen() {
         <View style={{ position: 'absolute', width: 260, height: 260, borderRadius: 130, borderWidth: 0.5, borderColor: 'rgba(85,153,255,0.12)' }} />
       </Animated.View>
 
-      {/* ── Logo ── */}
+      {/* ── Main Logo ── */}
       <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
         <Animated.View style={{ alignItems: 'center', opacity: logoOpacity, transform: [{ scale: logoScale }] }}>
           <Text style={{ fontSize: 58, fontWeight: '900', color: '#EEF0E8', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -3 }}>
@@ -200,6 +200,26 @@ export default function IntroScreen() {
           </Text>
         </Animated.View>
       </View>
+
+      {/* ── Bottom Branding ("from ahir infotech") ── */}
+      <Animated.View
+        style={{
+          position: 'absolute',
+          bottom: 45,
+          left: 0,
+          right: 0,
+          alignItems: 'center',
+          opacity: logoOpacity, // Fades seamlessly with the main logo
+        }}
+        pointerEvents="none"
+      >
+        <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', fontFamily: 'Outfit_400Regular', marginBottom: 2 }}>
+          from
+        </Text>
+        <Text style={{ fontSize: 17, fontWeight: '600', color: '#EEF0E8', fontFamily: 'Outfit_600SemiBold', letterSpacing: 0.5 }}>
+          AHIR INFOTECH
+        </Text>
+      </Animated.View>
 
       {/* ── Flash ── */}
       <Animated.View

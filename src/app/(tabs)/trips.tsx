@@ -1,14 +1,13 @@
-// src/app/(tabs)/trips.tsx
 import { useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Svg, Circle, Path, Rect } from 'react-native-svg';
 
-// 1. Import our custom hook
 import { useTripHistory } from '../../features/wallet/useTripHistory';
 
 type Filter = 'All' | 'Completed' | 'Cancelled';
 
+// ── Icons ─────────────────────────────────────────────────────────────────────
 const BikeSmall = ({ color = '#BEFF00' }: { color?: string }) => (
   <Svg width={20} height={16} viewBox="0 0 40 28" fill="none">
     <Circle cx={8} cy={22} r={6} stroke={color} strokeWidth={2} />
@@ -28,10 +27,9 @@ const AutoSmall = ({ color = 'rgba(255,255,255,0.45)' }: { color?: string }) => 
 export default function TripsScreen() {
   const [filter, setFilter] = useState<Filter>('All');
   
-  // 2. Fetch the data
-  const { data: trips = [], isLoading } = useTripHistory();
+  // Fetch raw backend Ride data
+  const { data: rawTrips = [], isLoading } = useTripHistory();
 
-  // 3. Handle loading state
   if (isLoading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A', justifyContent: 'center', alignItems: 'center' }}>
@@ -40,8 +38,35 @@ export default function TripsScreen() {
     );
   }
 
-  // 4. Filter the data coming from the hook
-  const filtered = trips.filter((t) => {
+  // ── Multi-Tenant Data Extractor ──
+  // The backend now returns the overall "Ride" (driver's journey).
+  // We must extract the specific logged-in user's data from the ride_passengers array.
+  const mappedTrips = rawTrips.map((trip: any) => {
+    // Assuming the backend filters the history so the logged-in user is the first/only passenger object returned
+    const myPassengerRecord = trip.ride_passengers?.[0] || {};
+    
+    return {
+      id: trip.id,
+      // Pull status from the passenger record, not the global ride
+      status: myPassengerRecord.status?.toLowerCase() || trip.status?.toLowerCase() || 'completed',
+      from: myPassengerRecord.pickup?.address?.split(',')[0] || trip.origin?.address?.split(',')[0] || 'Unknown',
+      to: myPassengerRecord.drop?.address?.split(',')[0] || trip.destination?.address?.split(',')[0] || 'Unknown',
+      
+      // Pull the specific passenger's fare breakdown
+      fare: myPassengerRecord.fare?.fare_total || 0,
+      
+      // Pull the specific passenger's distance, NOT the driver's total_distance_km
+      km: myPassengerRecord.segment_distance_km || trip.total_distance_km || 0,
+      
+      driver: trip.captain?.name || 'Searching...',
+      vehicleType: trip.captain?.vehicle?.vehicle_type?.toLowerCase() || (trip.is_rideshare ? 'auto' : 'bike'),
+      isShared: trip.is_rideshare || false,
+      date: new Date(trip.created_at || Date.now()).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+    };
+  });
+
+  // Filter based on the newly mapped passenger status
+  const filtered = mappedTrips.filter((t) => {
     if (filter === 'All') return true;
     if (filter === 'Completed') return t.status === 'completed';
     return t.status === 'cancelled';
@@ -80,7 +105,7 @@ export default function TripsScreen() {
           >
             {/* Vehicle Icon */}
             <View style={{ width: 40, height: 40, backgroundColor: '#101C12', borderRadius: 13, alignItems: 'center', justifyContent: 'center' }}>
-              {trip.vehicle === 'bike'
+              {trip.vehicleType === 'bike'
                 ? <BikeSmall color={trip.status === 'cancelled' ? 'rgba(255,80,80,0.5)' : '#BEFF00'} />
                 : <AutoSmall color={trip.status === 'cancelled' ? 'rgba(255,80,80,0.5)' : 'rgba(255,255,255,0.45)'} />
               }
@@ -91,9 +116,17 @@ export default function TripsScreen() {
               <Text style={{ fontSize: 13, fontWeight: '700', color: '#EEF0E8', fontFamily: 'Outfit_700Bold', letterSpacing: -0.1 }}>
                 {trip.from} → {trip.to}
               </Text>
-              <Text style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'Outfit_400Regular', marginTop: 3 }}>
-                {trip.date} · {trip.driver} · {trip.km} km
-              </Text>
+              
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+                <Text style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'Outfit_400Regular' }}>
+                  {trip.date} · {trip.driver} · {trip.km} km
+                </Text>
+                {trip.isShared && (
+                  <View style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, marginLeft: 6 }}>
+                    <Text style={{ fontSize: 8, color: 'rgba(255,255,255,0.6)', fontFamily: 'Outfit_700Bold' }}>SHARED</Text>
+                  </View>
+                )}
+              </View>
             </View>
 
             {/* Amount + Status */}

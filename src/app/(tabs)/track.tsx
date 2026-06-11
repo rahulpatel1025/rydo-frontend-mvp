@@ -1,51 +1,102 @@
+// src/app/(tabs)/track.tsx
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Svg, Circle, Path, Rect, Text as SvgText } from 'react-native-svg';
+import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 
-// Import our custom hook
+// API & Socket
 import { useActiveRide } from '../../features/booking/api/useActiveRide';
+import { getSocket, connectSocket } from '../../lib/socketClient';
 
-// Note: In a real app, this map would be a react-native-maps component. 
-// We are keeping the SVG placeholder for the MVP visual prototype.
-const TrackMap = ({ eta, routeStr, isBoarded }: { eta: number, routeStr: string, isBoarded: boolean }) => (
-  <Svg width="100%" height={195} viewBox="0 0 330 195">
-    <Rect width={330} height={195} fill="#0C1610" />
-    <Rect x={8} y={12} width={58} height={40} rx={4} fill="#0F1C12" />
-    <Rect x={218} y={18} width={66} height={50} rx={4} fill="#0F1C12" />
-    <Rect x={8} y={130} width={50} height={55} rx={4} fill="#0F1C12" />
-    <Rect x={258} y={128} width={62} height={58} rx={4} fill="#0F1C12" />
-    <Rect x={0} y={60} width={330} height={12} fill="#142018" />
-    <Rect x={0} y={128} width={330} height={10} fill="#142018" />
-    <Rect x={66} y={0} width={9} height={195} fill="#142018" />
-    <Rect x={172} y={0} width={8} height={195} fill="#142018" />
-    <Path d="M58 178 Q120 148 165 100 Q205 58 272 36" stroke="rgba(190,255,0,0.2)" strokeWidth={7} fill="none" strokeLinecap="round" />
-    <Path d="M58 178 Q120 148 165 100 Q205 58 272 36" stroke="#BEFF00" strokeWidth={2.5} fill="none" strokeLinecap="round" strokeDasharray="6 4" />
-    <Circle cx={272} cy={36} r={9} fill="rgba(190,255,0,0.18)" />
-    <Circle cx={272} cy={36} r={5} fill="#BEFF00" />
-    <Circle cx={58} cy={178} r={10} fill="rgba(190,255,0,0.18)" />
-    <Circle cx={58} cy={178} r={6} fill="#BEFF00" />
-    
-    {/* Captain Live Location Marker */}
-    <Circle cx={122} cy={140} r={12} fill="rgba(0,212,160,0.1)" />
-    <Circle cx={122} cy={140} r={9} fill="#06090A" />
-    <Circle cx={122} cy={140} r={5} fill="#00D4A0" />
-    
-    {!isBoarded && (
-      <>
-        <Rect x={90} y={93} width={65} height={22} rx={8} fill="#101C12" />
-        <SvgText x={122} y={108} textAnchor="middle" fill="#BEFF00" fontSize={11} fontWeight="700">{eta} min away</SvgText>
-      </>
-    )}
-    <SvgText x={10} y={186} fill="rgba(255,255,255,0.3)" fontSize={9}>{routeStr}</SvgText>
-  </Svg>
-);
+// ── Dark Mode Map Style ──
+const customDarkMapStyle = [
+  { elementType: "geometry", stylers: [{ color: "#101C12" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#1B2A1E" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#06090A" }] },
+];
 
 export default function TrackScreen() {
   const router = useRouter();
+  const mapRef = useRef<MapView>(null);
   
-  // Fetch the live data (Now expected to return PassengerStatus and is_rideshare flags)
+  // 1. Fetch the initial ride data (Only runs once now!)
   const { data, isLoading } = useActiveRide();
+
+  // 2. Real-Time State driven by WebSockets
+  const [liveDriverCoords, setLiveDriverCoords] = useState<{latitude: number, longitude: number} | null>(null);
+  const [liveStatus, setLiveStatus] = useState<string | null>(null);
+  const [liveEta, setLiveEta] = useState<number | null>(null);
+
+  // Fallback pickup coords (in a production app, extract this from `data` if available)
+  const pickupCoords = { latitude: 20.2760, longitude: 73.0084 };
+
+  // ── WebSocket Integration ──
+  useEffect(() => {
+    let socket = getSocket();
+
+    const setupSocket = async () => {
+      // Ensure socket is connected if user refreshed the app on this screen
+      if (!socket?.connected) {
+        socket = await connectSocket();
+      }
+
+      if (!data?.id) return;
+
+      // 1. Safety net: Re-join the ride room just in case
+      socket.emit('rider:join-ride', { ride_id: data.id });
+
+      // 2. Listen for the driver's car moving
+      socket.on('driver:location-update', (payload: any) => {
+        if (payload.location) {
+          setLiveDriverCoords({
+            latitude: payload.location.lat,
+            longitude: payload.location.lng,
+          });
+          // Optional: Update ETA if backend sends distance/duration updates in payload
+          if (payload.eta_minutes) setLiveEta(payload.eta_minutes);
+        }
+      });
+
+      // 3. Listen for the driver accepting, arriving, or starting the trip
+      socket.on('ride:status-update', (payload: any) => {
+        if (payload.status) {
+          setLiveStatus(payload.status.toUpperCase());
+        }
+      });
+    };
+
+    setupSocket();
+
+    return () => {
+      // Cleanup listeners so they don't multiply if the component re-renders
+      if (socket) {
+        socket.off('driver:location-update');
+        socket.off('ride:status-update');
+      }
+    };
+  }, [data?.id]);
+
+
+  // ── Derived State (Prefers live Socket data over initial REST data) ──
+  const currentStatus = liveStatus || data?.status;
+  const currentEta = liveEta || data?.eta_minutes;
+  const isBoarded = currentStatus === 'BOARDED' || currentStatus === 'TRIP_ACTIVE';
+  const isArrived = currentStatus === 'ARRIVED';
+
+  // ── Map Animation ──
+  // Animate the map to keep both the pickup spot and the moving driver in view
+  useEffect(() => {
+    if (mapRef.current && currentStatus !== 'SEARCHING' && liveDriverCoords) {
+      mapRef.current.fitToCoordinates([pickupCoords, liveDriverCoords], {
+        edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
+        animated: true,
+      });
+    }
+  }, [currentStatus, liveDriverCoords]);
 
   if (isLoading || !data) {
     return (
@@ -56,18 +107,46 @@ export default function TrackScreen() {
   }
 
   const routeString = `${data.route.from} → ${data.route.to} · ${data.route.distance_km} km`;
-  
-  // Map PassengerStatus to boolean states
-  const isBoarded = data.status === 'BOARDED';
-  const isArrived = data.status === 'ARRIVED';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A' }}>
       <ScrollView showsVerticalScrollIndicator={false}>
 
-        {/* ── Map ── */}
+        {/* ── Real Map Implementation ── */}
         <View style={styles.mapContainer}>
-          <TrackMap eta={data.eta_minutes} routeStr={routeString} isBoarded={isBoarded} />
+          <MapView
+            ref={mapRef}
+            provider={PROVIDER_DEFAULT}
+            customMapStyle={customDarkMapStyle}
+            style={styles.mapView}
+            initialRegion={{ ...pickupCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }}
+            showsUserLocation={false}
+            showsCompass={false}
+            pitchEnabled={false}
+          >
+            <Marker coordinate={pickupCoords}>
+              <View style={styles.pickupMarker}>
+                <View style={styles.pickupMarkerCore} />
+              </View>
+            </Marker>
+            
+            {/* Watch this marker move in real-time! */}
+            {!isBoarded && liveDriverCoords && (
+              <Marker coordinate={liveDriverCoords}>
+                <View style={styles.driverMarker}>
+                  <Text style={{ fontSize: 16 }}>🛺</Text>
+                </View>
+              </Marker>
+            )}
+          </MapView>
+          
+          {!isBoarded && currentEta && (
+            <View style={styles.mapOverlayPill}>
+              <Text style={styles.mapOverlayText}>{currentEta} min away</Text>
+            </View>
+          )}
+          
+          <Text style={styles.mapOverlayRoute}>{routeString}</Text>
         </View>
 
         {/* ── Shared Ride Detour Banner ── */}
@@ -85,15 +164,14 @@ export default function TrackScreen() {
             <View style={[styles.statusDot, isBoarded && { backgroundColor: '#00D4A0' }]} />
             <View>
               <Text style={[styles.statusText, isBoarded && { color: '#00D4A0' }]}>
-                {data.status_text || (isBoarded ? 'Heading to destination' : 'Captain is on the way')}
+                {isArrived ? 'Captain has arrived' : isBoarded ? 'Heading to destination' : 'Captain is on the way'}
               </Text>
               <Text style={styles.etaText}>
-                {isBoarded ? `Drop-off in ~${data.eta_minutes} min` : `Arriving in ${data.eta_minutes} min`}
+                {isBoarded ? `Drop-off in ~${currentEta} min` : `Arriving in ${currentEta} min`}
               </Text>
             </View>
           </View>
           
-          {/* Only show OTP before the passenger boards */}
           {!isBoarded && data.otp && (
             <View style={styles.otpBox}>
               <Text style={styles.otpLabel}>PIN</Text>
@@ -119,7 +197,6 @@ export default function TrackScreen() {
             </View>
           </View>
 
-          {/* Driver Stats */}
           <View style={styles.statsRow}>
             {[
               { value: data.driver.rating.toString(), label: 'Rating' }, 
@@ -140,7 +217,6 @@ export default function TrackScreen() {
             <Text style={styles.callBtnText}>Call Captain</Text>
           </TouchableOpacity>
           
-          {/* Disable cancellation after boarding */}
           <TouchableOpacity 
             onPress={() => router.back()} 
             style={[styles.cancelBtn, isBoarded && { opacity: 0.4 }]}
@@ -177,7 +253,15 @@ export default function TrackScreen() {
 }
 
 const styles = StyleSheet.create({
-  mapContainer: { margin: 14, borderRadius: 18, overflow: 'hidden', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)' },
+  mapContainer: { margin: 14, height: 195, borderRadius: 18, overflow: 'hidden', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', position: 'relative' },
+  mapView: { flex: 1 },
+  pickupMarker: { width: 16, height: 16, borderRadius: 8, backgroundColor: 'rgba(190,255,0,0.2)', alignItems: 'center', justifyContent: 'center' },
+  pickupMarkerCore: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#BEFF00' },
+  driverMarker: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#101C12', borderWidth: 2, borderColor: '#BEFF00', justifyContent: 'center', alignItems: 'center' },
+  mapOverlayPill: { position: 'absolute', top: '50%', left: '50%', marginLeft: -40, marginTop: -20, backgroundColor: '#101C12', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#BEFF00' },
+  mapOverlayText: { color: '#BEFF00', fontSize: 11, fontWeight: '700', fontFamily: 'Outfit_700Bold' },
+  mapOverlayRoute: { position: 'absolute', bottom: 10, left: 14, color: 'rgba(255,255,255,0.7)', fontSize: 10, fontFamily: 'Outfit_500Medium', backgroundColor: 'rgba(6,9,10,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  
   sharedBanner: { marginHorizontal: 14, marginBottom: 10, backgroundColor: 'rgba(255,165,0,0.1)', borderWidth: 0.5, borderColor: 'rgba(255,165,0,0.3)', borderRadius: 12, padding: 12 },
   sharedBannerText: { color: 'rgba(255,200,100,0.9)', fontSize: 12, fontFamily: 'Outfit_500Medium', lineHeight: 18 },
   statusPill: { marginHorizontal: 14, marginBottom: 10, backgroundColor: 'rgba(190,255,0,0.05)', borderWidth: 0.5, borderColor: 'rgba(190,255,0,0.2)', borderRadius: 16, padding: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

@@ -1,13 +1,14 @@
-// src/app/(tabs)/index.tsx
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Pressable, ActivityIndicator, StyleSheet, TextInput, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import MapView, { PROVIDER_DEFAULT } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 
 // Imports from our cleanly separated architecture
 import { useHomeData, VehicleType } from '../../features/booking/api/useHomeData';
+import { useNearbyDrivers, NearbyDriver } from '../../features/booking/api/useNearbyDrivers';
+import { useLocationSearch, PlaceSearchResult } from '../../features/booking/api/useLocationSearch'; // ── NEW: Real Search ──
 import { SearchIcon, PlusIcon, BikeIcon, AutoIcon, SharedAutoIcon } from '../../components/ui/Icons';
 
 export default function HomeScreen() {
@@ -20,8 +21,36 @@ export default function HomeScreen() {
     longitudeDelta: 0.01,
   });
   
-  // Fetch the data from our React Query hook
+  // ── Search State ──
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+
+  // Fetch home static config data
   const { data, isLoading, isError } = useHomeData();
+
+  // Fetch live nearby drivers based on current region
+  const { data: nearbyData } = useNearbyDrivers(
+    { lat: region.latitude, lng: region.longitude },
+    5,
+    20
+  );
+  const nearbyDrivers: NearbyDriver[] = nearbyData?.nearby_drivers ?? [];
+
+  // ── Debounce effect for Search ──
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  // ── Fetch Real Mapbox Locations ──
+  const { data: searchResults = [], isLoading: isSearchLoading } = useLocationSearch(
+    debouncedQuery,
+    region.latitude,
+    region.longitude
+  );
 
   useEffect(() => {
     (async () => {
@@ -41,6 +70,15 @@ export default function HomeScreen() {
     primary: { bg: 'rgba(190,255,0,0.1)',  text: '#BEFF00' },
     faint:   { bg: 'rgba(255,255,255,0.05)', text: 'rgba(255,255,255,0.3)' },
     muted:   { bg: 'rgba(255,255,255,0.05)', text: 'rgba(255,255,255,0.3)' },
+  };
+
+  const handleSelectSearchResult = (item: PlaceSearchResult) => {
+    setIsSearchFocused(false);
+    setSearchQuery('');
+    
+    // In the future, we can pass `item` to book.tsx via expo-router params
+    // For now, we clear the overlay and push to the booking flow
+    router.push('/(tabs)/book');
   };
 
   // Loading State
@@ -65,7 +103,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A' }}>
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
         {/* ── Greeting ── */}
         <View style={{ paddingHorizontal: 18, paddingTop: 14 }}>
@@ -77,23 +115,57 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        {/* ── Search Bar ── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginTop: 12 }}>
-          <TouchableOpacity
-            onPress={() => router.push('/(tabs)/book')}
-            style={{ flex: 1, backgroundColor: '#101C12', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', gap: 10 }}
-          >
-            <SearchIcon />
-            <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', fontFamily: 'Outfit_400Regular', flex: 1 }}>
-              Search destination…
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => router.push('/(tabs)/book')}
-            style={{ width: 44, height: 44, backgroundColor: '#BEFF00', borderRadius: 13, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <PlusIcon />
-          </TouchableOpacity>
+        {/* ── Search Bar & Overlay ── */}
+        <View style={{ marginHorizontal: 14, marginTop: 12, zIndex: 50 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View
+              style={{ flex: 1, backgroundColor: '#101C12', borderWidth: 0.5, borderColor: isSearchFocused ? '#BEFF00' : 'rgba(255,255,255,0.1)', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+            >
+              <SearchIcon />
+              <TextInput
+                style={{ fontSize: 13, color: '#EEF0E8', fontFamily: 'Outfit_400Regular', flex: 1 }}
+                placeholder="Search destination…"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                onFocus={() => setIsSearchFocused(true)}
+                onBlur={() => {
+                  // Slight delay to allow tap on result before hiding the overlay
+                  setTimeout(() => setIsSearchFocused(false), 200);
+                }}
+              />
+            </View>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/book')}
+              style={{ width: 44, height: 44, backgroundColor: '#BEFF00', borderRadius: 13, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <PlusIcon />
+            </TouchableOpacity>
+          </View>
+
+          {/* Autocomplete Dropdown over the Map */}
+          {isSearchFocused && searchQuery.length > 0 && (
+            <View style={styles.autocomplete}>
+              {isSearchLoading ? (
+                <ActivityIndicator size="small" color="#BEFF00" style={{ padding: 20 }} />
+              ) : (
+                <FlatList
+                  data={searchResults}
+                  keyExtractor={(item) => item.place_id}
+                  keyboardShouldPersistTaps="handled"
+                  renderItem={({ item }) => (
+                    <TouchableOpacity style={styles.resultRow} onPress={() => handleSelectSearchResult(item)}>
+                      <SearchIcon />
+                      <View style={{ marginLeft: 10, flex: 1 }}>
+                        <Text style={styles.resultName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.resultSub} numberOfLines={1}>{item.address}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+            </View>
+          )}
         </View>
 
         {/* ── Live Map Preview Block ── */}
@@ -103,9 +175,26 @@ export default function HomeScreen() {
             style={{ flex: 1 }} 
             region={region} 
             showsUserLocation={true}
-            scrollEnabled={false} // Prevents the map from scrolling when the user is trying to scroll the page
+            scrollEnabled={false}
             zoomEnabled={false}
-          />
+          >
+            {/* ── Render Live Driver Map Pins ── */}
+            {nearbyDrivers.map((driver) => (
+              <Marker
+                key={driver.driver_id}
+                coordinate={{
+                  latitude:  driver.latitude,
+                  longitude: driver.longitude,
+                }}
+              >
+                <View style={styles.driverPin}>
+                  <Text style={{ fontSize: 12 }}>
+                    {driver.ride_type === 'BIKE' ? '🛵' : '🛺'}
+                  </Text>
+                </View>
+              </Marker>
+            ))}
+          </MapView>
         </View>
 
         {/* ── Quick Routes (Dynamic) ── */}
@@ -137,7 +226,7 @@ export default function HomeScreen() {
         <View style={{ flexDirection: 'row', gap: 7, paddingHorizontal: 14, paddingBottom: 14 }}>
           {data.vehicles.map((v) => {
             const active = selectedVehicle === v.id;
-            const tag = tagColors[v.tagStyle];
+            const tag = tagColors[v.tagStyle as keyof typeof tagColors];
             return (
               <Pressable
                 key={v.id}
@@ -185,3 +274,53 @@ export default function HomeScreen() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  driverPin: {
+    width: 26, 
+    height: 26, 
+    backgroundColor: '#101C12', 
+    borderRadius: 13, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    borderWidth: 1.5, 
+    borderColor: '#BEFF00',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  autocomplete: {
+    position: 'absolute', 
+    top: 52, 
+    left: 0, 
+    right: 52, 
+    backgroundColor: '#101C12', 
+    borderRadius: 16, 
+    maxHeight: 220, 
+    borderWidth: 0.5, 
+    borderColor: 'rgba(255,255,255,0.08)', 
+    paddingHorizontal: 6, 
+    zIndex: 100, 
+    elevation: 10
+  },
+  resultRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingVertical: 13, 
+    paddingHorizontal: 10, 
+    borderBottomWidth: 0.5, 
+    borderBottomColor: 'rgba(255,255,255,0.04)' 
+  },
+  resultName: { 
+    color: '#EEF0E8', 
+    fontSize: 13, 
+    fontFamily: 'Outfit_600SemiBold' 
+  },
+  resultSub: { 
+    color: 'rgba(255,255,255,0.35)', 
+    fontSize: 10, 
+    marginTop: 2 
+  },
+});
