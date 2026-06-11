@@ -1,5 +1,5 @@
 // src/features/booking/api/useBookRide.ts
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../../../lib/apiClient';
 import { connectSocket } from '../../../lib/socketClient';
 
@@ -17,6 +17,9 @@ interface BookRidePayload {
 }
 
 export function useBookRide() {
+  // 1. Initialize the query client
+  const queryClient = useQueryClient(); 
+
   return useMutation({
     mutationFn: async (payload: BookRidePayload) => {
       const response = await apiClient.post('/users/rides/bookride', payload);
@@ -24,6 +27,9 @@ export function useBookRide() {
     },
     onSuccess: async (data) => {
       console.log("✅ Ride successfully booked!", data);
+      
+      // 2. ✨ THE FIX: Force React Query to fetch the new ride data immediately!
+      queryClient.invalidateQueries({ queryKey: ['activeRide'] });
       
       try {
         // Connect to the socket immediately upon booking

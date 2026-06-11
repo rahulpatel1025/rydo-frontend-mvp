@@ -17,6 +17,7 @@ export const connectSocket = async () => {
     transports: ['websocket'],
     auth: { token },
   });
+  
 
   socket.on('connect', () => console.log('🟢 Rider WebSocket Connected:', socket?.id));
   socket.on('connect_error', (err: any) => console.error('🔴 Rider WebSocket Error:', err.message));
