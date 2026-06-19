@@ -1,15 +1,18 @@
 // src/app/(tabs)/track.tsx
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet, Alert, useColorScheme } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import polyline from '@mapbox/polyline';
 
-// API & Socket
 import { useActiveRide } from '../../features/booking/api/useActiveRide';
+import { apiClient } from '../../lib/apiClient';
 import { getSocket, connectSocket } from '../../lib/socketClient';
+import { useRouteEstimate } from '../../features/booking/api/useRouteEstimate';
+import { themeConfig } from '../../theme'; // Import your theme dictionary
 
-// ── Dark Mode Map Style ──
 const customDarkMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#101C12" }] },
   { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
@@ -22,225 +25,424 @@ const customDarkMapStyle = [
 export default function TrackScreen() {
   const router = useRouter();
   const mapRef = useRef<MapView>(null);
-  
-  // 1. Fetch the initial ride data (Only runs once now!)
+  const queryClient = useQueryClient();
+
   const { data, isLoading } = useActiveRide();
 
-  // 2. Real-Time State driven by WebSockets
-  const [liveDriverCoords, setLiveDriverCoords] = useState<{latitude: number, longitude: number} | null>(null);
-  const [liveStatus, setLiveStatus] = useState<string | null>(null);
+  // ── Theme Hook ──
+  const colorScheme = useColorScheme() || 'dark';
+  const theme = themeConfig[colorScheme];
+
+  // ── LOCAL LIVE STATE ──
+  const [liveDriverCoords, setLiveDriverCoords] = useState<{ latitude: number, longitude: number } | null>(null);
   const [liveEta, setLiveEta] = useState<number | null>(null);
 
-  // Fallback pickup coords (in a production app, extract this from `data` if available)
-  const pickupCoords = { latitude: 20.2760, longitude: 73.0084 };
+  // 🚨 THROTTLE STATE: Protects your API billing limits
+  const [routeDriverCoords, setRouteDriverCoords] = useState<{ latitude: number, longitude: number } | null>(null);
+  const latestCoordsRef = useRef<{ latitude: number, longitude: number } | null>(null);
+
+  const isNavigatingAwayRef = useRef(false);
+  const subscribedRideIdRef = useRef<string | null>(null);
+
+  // ── THROTTLE LOGIC (30 Seconds) ──
+  useEffect(() => {
+    latestCoordsRef.current = liveDriverCoords;
+    if (liveDriverCoords && !routeDriverCoords) {
+      setRouteDriverCoords(liveDriverCoords);
+    }
+  }, [liveDriverCoords]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (latestCoordsRef.current) {
+        setRouteDriverCoords(latestCoordsRef.current);
+      }
+    }, 30000); 
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // ── Safe Navigation Helper ──
+  const safeNavigateHome = useCallback(() => {
+    if (isNavigatingAwayRef.current) return;
+    isNavigatingAwayRef.current = true;
+
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
+  }, [router]);
+
+  const cancelRideMutation = useMutation({
+    mutationFn: async (ridePassengerId: string) => {
+      const res = await apiClient.post(`/users/rides/${ridePassengerId}/cancel`);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['activeRide'] });
+      queryClient.removeQueries({ queryKey: ['activeRide'] });
+      safeNavigateHome();
+    },
+    onError: (error: any) => {
+      isNavigatingAwayRef.current = false; 
+      Alert.alert('Cancellation Failed', error.response?.data?.message || 'Failed to cancel the ride.');
+    }
+  });
+
+  const handleCancelRide = useCallback(() => {
+    if (!data?.id) return;
+    Alert.alert("Cancel Ride?", "Are you sure you want to cancel this ride?", [
+      { text: "No", style: "cancel" },
+      { text: "Yes, Cancel", style: "destructive", onPress: () => cancelRideMutation.mutate(data.id) }
+    ]);
+  }, [data?.id, cancelRideMutation]);
 
   // ── WebSocket Integration ──
   useEffect(() => {
-    let socket = getSocket();
+    if (!data?.id) return;
+    if (subscribedRideIdRef.current === data.id) return; 
+
+    let localSocket = getSocket();
+    let isMounted = true;
 
     const setupSocket = async () => {
-      // Ensure socket is connected if user refreshed the app on this screen
-      if (!socket?.connected) {
-        socket = await connectSocket();
+      try {
+        if (!localSocket?.connected) {
+          localSocket = await connectSocket();
+        }
+        if (!isMounted) return;
+
+        subscribedRideIdRef.current = data.id;
+        console.log(`[USER DEBUG] 🎧 JOINING SOCKET ROOM: ${data.id}`);
+        localSocket.emit('ride:join', { ride_id: data.id });
+
+        localSocket.on('driver:location-update', (payload: any) => {
+          if (!isMounted) return;
+          if (payload?.location) {
+            setLiveDriverCoords({
+              latitude: payload.location.lat,
+              longitude: payload.location.lng,
+            });
+            if (payload.eta_minutes !== undefined) setLiveEta(payload.eta_minutes);
+          }
+        });
+
+        const handleStatusChange = (event: string) => (payload: any) => {
+          if (!isMounted) return;
+          console.log(`[USER DEBUG] 📡 ${event} — invalidating query`);
+          queryClient.invalidateQueries({ queryKey: ['activeRide'] });
+        };
+
+        localSocket.on('ride:status-update', handleStatusChange('ride:status-update'));
+        localSocket.on('ride:accepted', handleStatusChange('ride:accepted'));
+        localSocket.on('ride:arrived', handleStatusChange('ride:arrived'));
+        localSocket.on('ride:started', handleStatusChange('ride:started'));
+        localSocket.on('ride:cancelled', handleStatusChange('ride:cancelled'));
+        localSocket.on('ride:completed', handleStatusChange('ride:completed'));
+      } catch (err) {
+        console.error('[USER DEBUG] Socket setup failed:', err);
       }
-
-      if (!data?.id) return;
-
-      // 1. Safety net: Re-join the ride room just in case
-      socket.emit('rider:join-ride', { ride_id: data.id });
-
-      // 2. Listen for the driver's car moving
-      socket.on('driver:location-update', (payload: any) => {
-        if (payload.location) {
-          setLiveDriverCoords({
-            latitude: payload.location.lat,
-            longitude: payload.location.lng,
-          });
-          // Optional: Update ETA if backend sends distance/duration updates in payload
-          if (payload.eta_minutes) setLiveEta(payload.eta_minutes);
-        }
-      });
-
-      // 3. Listen for the driver accepting, arriving, or starting the trip
-      socket.on('ride:status-update', (payload: any) => {
-        if (payload.status) {
-          setLiveStatus(payload.status.toUpperCase());
-        }
-      });
     };
 
     setupSocket();
 
     return () => {
-      // Cleanup listeners so they don't multiply if the component re-renders
-      if (socket) {
-        socket.off('driver:location-update');
-        socket.off('ride:status-update');
+      isMounted = false;
+      const s = getSocket();
+      if (s && subscribedRideIdRef.current) {
+        console.log(`[USER DEBUG] 🚪 LEAVING SOCKET ROOM: ${subscribedRideIdRef.current}`);
+        s.emit('ride:leave', { ride_id: subscribedRideIdRef.current });
+        s.off('driver:location-update');
+        s.off('ride:status-update');
+        s.off('ride:accepted');
+        s.off('ride:arrived');
+        s.off('ride:started');
+        s.off('ride:cancelled');
+        s.off('ride:completed');
+        subscribedRideIdRef.current = null;
       }
     };
-  }, [data?.id]);
+  }, [data?.id, queryClient]);
 
+  // ── Derived State ──
+  const currentStatus = data?.status?.toUpperCase();
+  const currentEta = liveEta !== null ? liveEta : data?.eta_minutes;
 
-  // ── Derived State (Prefers live Socket data over initial REST data) ──
-  const currentStatus = liveStatus || data?.status;
-  const currentEta = liveEta || data?.eta_minutes;
+  const isSearching = currentStatus === 'SEARCHING';
   const isBoarded = currentStatus === 'BOARDED' || currentStatus === 'TRIP_ACTIVE';
   const isArrived = currentStatus === 'ARRIVED';
 
-  // ── Map Animation ──
-  // Animate the map to keep both the pickup spot and the moving driver in view
-  useEffect(() => {
-    if (mapRef.current && currentStatus !== 'SEARCHING' && liveDriverCoords) {
-      mapRef.current.fitToCoordinates([pickupCoords, liveDriverCoords], {
-        edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
-        animated: true,
-      });
+  const isApproaching = !isSearching && !isBoarded && !isArrived && !!routeDriverCoords && !!data?.pickup?.location;
+
+  const approachParams = isApproaching && routeDriverCoords ? {
+    pickup_lat: routeDriverCoords.latitude,
+    pickup_lng: routeDriverCoords.longitude,
+    drop_lat: data.pickup.location.lat,
+    drop_lng: data.pickup.location.lng,
+  } : undefined;
+
+  const { data: approachData } = useRouteEstimate(approachParams);
+
+  let approachCoords: { latitude: number; longitude: number }[] = [];
+  let dynamicEta = currentEta; 
+
+  if (isApproaching && approachData) {
+    const rawDuration = approachData.duration_mins || (approachData as any)?.data?.duration_mins;
+    if (rawDuration !== undefined) {
+      dynamicEta = Math.abs(Math.round(Number(rawDuration)));
     }
-  }, [currentStatus, liveDriverCoords]);
+
+    const geom = approachData.geometry || (approachData as any)?.data?.geometry;
+    if (geom && typeof geom === 'string') {
+      try {
+        const rawPoints = polyline.decode(geom, 6);
+        approachCoords = rawPoints.map(p => ({ latitude: p[0], longitude: p[1] }));
+      } catch (e) {
+        console.error("Approach polyline decode failed", e);
+      }
+    }
+  }
+
+  // ── Terminal State Handling ──
+  useEffect(() => {
+    if (!data) return;
+
+    if (data.status === 'CANCELLED') {
+      const driverHadAccepted = !!data.driver?.name;
+
+      if (driverHadAccepted) {
+        Alert.alert(
+          "Captain Cancelled",
+          "Your captain had to cancel the trip. We'll find you a new one.",
+          [{
+            text: "OK",
+            onPress: () => {
+              queryClient.removeQueries({ queryKey: ['activeRide'] });
+              safeNavigateHome();
+            }
+          }]
+        );
+      } else {
+        queryClient.removeQueries({ queryKey: ['activeRide'] });
+        safeNavigateHome();
+      }
+    }
+
+    if (data.status === 'COMPLETED') {
+      queryClient.removeQueries({ queryKey: ['activeRide'] });
+      safeNavigateHome();
+    }
+  }, [data?.status, data?.driver?.name, queryClient, safeNavigateHome]);
+
+  // ── Map Animation ──
+  useEffect(() => {
+    if (mapRef.current && !isSearching && liveDriverCoords) {
+      mapRef.current.animateCamera({ center: liveDriverCoords, zoom: 16 }, { duration: 1000 });
+    }
+  }, [isSearching, liveDriverCoords]);
 
   if (isLoading || !data) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#BEFF00" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={theme.accent} />
       </SafeAreaView>
     );
   }
 
-  const routeString = `${data.route.from} → ${data.route.to} · ${data.route.distance_km} km`;
+  const routeCoords = data?.route?.coords || [];
+  const hasRoute = routeCoords.length > 0;
+
+  const defaultRegion = {
+    latitude: data?.pickup?.location?.lat || 20.2731,
+    longitude: data?.pickup?.location?.lng || 72.9966,
+    latitudeDelta: 0.012,
+    longitudeDelta: 0.012
+  };
+
+  let displayFrom = data.route?.from || 'Pickup';
+  if (displayFrom.includes("Drag the map")) {
+    displayFrom = "Pinned Location";
+  }
+  const routeString = `${displayFrom} → ${data.route?.to || 'Drop-off'}`;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <ScrollView showsVerticalScrollIndicator={false}>
 
-        {/* ── Real Map Implementation ── */}
-        <View style={styles.mapContainer}>
+        <View style={[styles.mapContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <MapView
             ref={mapRef}
             provider={PROVIDER_DEFAULT}
-            customMapStyle={customDarkMapStyle}
+            // Auto-switch map style based on Light/Dark mode
+            customMapStyle={colorScheme === 'dark' ? customDarkMapStyle : []}
             style={styles.mapView}
-            initialRegion={{ ...pickupCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }}
-            showsUserLocation={false}
+            initialRegion={defaultRegion}
+            showsUserLocation={true}
             showsCompass={false}
             pitchEnabled={false}
           >
-            <Marker coordinate={pickupCoords}>
-              <View style={styles.pickupMarker}>
-                <View style={styles.pickupMarkerCore} />
-              </View>
-            </Marker>
-            
-            {/* Watch this marker move in real-time! */}
-            {!isBoarded && liveDriverCoords && (
-              <Marker coordinate={liveDriverCoords}>
-                <View style={styles.driverMarker}>
+            {/* 1. Main Trip Route */}
+            {hasRoute && (
+              <Polyline 
+                coordinates={routeCoords} 
+                strokeColor={isBoarded ? theme.accent : "#666666"} 
+                strokeWidth={isBoarded ? 4 : 3} 
+                lineJoin="round" 
+                lineCap="round" 
+                lineDashPattern={isBoarded ? undefined : [10, 10]} 
+              />
+            )}
+
+            {/* 2. Driver Approach Route */}
+            {approachCoords.length > 0 && (
+              <Polyline 
+                coordinates={approachCoords} 
+                strokeColor="#4285F4" 
+                strokeWidth={4} 
+                lineJoin="round" 
+                lineCap="round" 
+              />
+            )}
+
+            {data?.pickup?.location && (
+              <Marker coordinate={{ latitude: data.pickup.location.lat, longitude: data.pickup.location.lng }}>
+                <View style={[styles.pickupMarker, { backgroundColor: theme.accentSoft }]}>
+                  <View style={[styles.pickupMarkerCore, { backgroundColor: theme.accent }]} />
+                </View>
+              </Marker>
+            )}
+
+            {!isSearching && !isBoarded && liveDriverCoords && (
+              <Marker coordinate={liveDriverCoords} anchor={{ x: 0.5, y: 0.5 }}>
+                <View style={[styles.driverMarker, { backgroundColor: theme.card, borderColor: theme.accent }]}>
                   <Text style={{ fontSize: 16 }}>🛺</Text>
                 </View>
               </Marker>
             )}
           </MapView>
-          
-          {!isBoarded && currentEta && (
-            <View style={styles.mapOverlayPill}>
-              <Text style={styles.mapOverlayText}>{currentEta} min away</Text>
+
+          {!isSearching && !isBoarded && !isArrived && typeof dynamicEta === 'number' && (
+            <View style={[styles.mapOverlayPill, { backgroundColor: theme.card, borderColor: theme.accent }]}>
+              <Text style={[styles.mapOverlayText, { color: theme.accent }]}>{dynamicEta} min away</Text>
             </View>
           )}
-          
-          <Text style={styles.mapOverlayRoute}>{routeString}</Text>
+
+          <Text style={[styles.mapOverlayRoute, { backgroundColor: theme.card, color: theme.textSub }]} numberOfLines={1}>{routeString}</Text>
         </View>
 
-        {/* ── Shared Ride Detour Banner ── */}
         {data.is_rideshare && !isBoarded && (
           <View style={styles.sharedBanner}>
             <Text style={styles.sharedBannerText}>
-              🚐 You are in a shared ride. The captain may pick up or drop off others along the way, adding up to ~{data.detour_km ?? 1.5} km to your trip.
+              🚐 You are in a shared ride. The captain may pick up or drop off others along the way.
             </Text>
           </View>
         )}
 
-        {/* ── Status Pill & OTP ── */}
-        <View style={styles.statusPill}>
+        <View style={[styles.statusPill, { backgroundColor: theme.accentSoft, borderColor: theme.border }]}>
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-            <View style={[styles.statusDot, isBoarded && { backgroundColor: '#00D4A0' }]} />
+            {isSearching ? (
+              <ActivityIndicator size="small" color={theme.accent} style={{ marginRight: 4 }} />
+            ) : (
+              <View style={[styles.statusDot, { backgroundColor: isBoarded ? '#00D4A0' : theme.accent }]} />
+            )}
             <View>
-              <Text style={[styles.statusText, isBoarded && { color: '#00D4A0' }]}>
-                {isArrived ? 'Captain has arrived' : isBoarded ? 'Heading to destination' : 'Captain is on the way'}
+              <Text style={[styles.statusText, { color: isBoarded ? '#00D4A0' : theme.accent }]}>
+                {isSearching ? 'Finding your captain...' :
+                 isArrived ? 'Captain has arrived' :
+                 isBoarded ? 'Heading to destination' : 'Captain is on the way'}
               </Text>
-              <Text style={styles.etaText}>
-                {isBoarded ? `Drop-off in ~${currentEta} min` : `Arriving in ${currentEta} min`}
-              </Text>
+              {!isSearching && (
+                <Text style={[styles.etaText, { color: theme.textSub }]}>
+                  {isBoarded ? `Drop-off in ~${currentEta} min` : 
+                   isArrived ? 'Please board the vehicle' : 
+                   `Arriving in ${dynamicEta} min`}
+                </Text>
+              )}
             </View>
           </View>
-          
-          {!isBoarded && data.otp && (
-            <View style={styles.otpBox}>
-              <Text style={styles.otpLabel}>PIN</Text>
-              <Text style={styles.otpValue}>{data.otp}</Text>
+
+          {!isSearching && !isBoarded && data.otp && (
+            <View style={[styles.otpBox, { backgroundColor: theme.accent }]}>
+              <Text style={[styles.otpLabel, { color: theme.background }]}>PIN</Text>
+              <Text style={[styles.otpValue, { color: theme.background }]}>{data.otp}</Text>
             </View>
           )}
         </View>
 
-        {/* ── Driver Card ── */}
-        <View style={styles.driverCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13 }}>
-            <View style={styles.driverAvatar}>
-              <Text style={styles.driverInitials}>{data.driver.initials}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.driverName}>{data.driver.name}</Text>
-              <Text style={styles.driverSubText}>
-                {data.driver.rating} ★ · {data.driver.trips} trips · {data.vehicle}
-              </Text>
-            </View>
-            <View style={styles.plateBox}>
-              <Text style={styles.plateText}>{data.driver.plate}</Text>
-            </View>
+        {isSearching ? (
+          <View style={[styles.searchingCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <ActivityIndicator size="large" color={theme.accent} style={{ marginBottom: 12 }} />
+            <Text style={[styles.searchingTitle, { color: theme.accent }]}>Contacting Captains</Text>
+            <Text style={[styles.searchingSubText, { color: theme.textSub }]}>Please wait while we match you with the nearest available vehicle.</Text>
           </View>
-
-          <View style={styles.statsRow}>
-            {[
-              { value: data.driver.rating.toString(), label: 'Rating' }, 
-              { value: `${(data.driver.trips / 1000).toFixed(1)}k`, label: 'Rides' }, 
-              { value: `${data.driver.on_time_pct}%`, label: 'On time' }
-            ].map((s, i) => (
-              <View key={i} style={{ flex: 1, alignItems: 'center' }}>
-                <Text style={styles.statValue}>{s.value}</Text>
-                <Text style={styles.statLabel}>{s.label}</Text>
+        ) : (
+          <View style={[styles.driverCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13 }}>
+              <View style={[styles.driverAvatar, { backgroundColor: theme.background }]}>
+                <Text style={[styles.driverInitials, { color: theme.accent }]}>{data?.driver?.initials || 'DR'}</Text>
               </View>
-            ))}
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.driverName, { color: theme.text }]}>{data?.driver?.name || 'Your Captain'}</Text>
+                <Text style={[styles.driverSubText, { color: theme.textSub }]}>
+                  {data?.driver?.rating || 5.0} ★ · {data?.driver?.trips || 0} trips · {data?.vehicle || 'Auto'}
+                </Text>
+              </View>
+              <View style={[styles.plateBox, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                <Text style={[styles.plateText, { color: theme.accent }]}>{data?.driver?.plate || 'MH-12'}</Text>
+              </View>
+            </View>
+
+            <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
+              {[
+                { value: data?.driver?.rating?.toString() || '5.0', label: 'Rating' },
+                { value: `${((data?.driver?.trips || 0) / 1000).toFixed(1)}k`, label: 'Rides' },
+                { value: `${data?.driver?.on_time_pct || 98}%`, label: 'On time' }
+              ].map((s, i) => (
+                <View key={i} style={{ flex: 1, alignItems: 'center' }}>
+                  <Text style={[styles.statValue, { color: theme.text }]}>{s.value}</Text>
+                  <Text style={[styles.statLabel, { color: theme.textSub }]}>{s.label}</Text>
+                </View>
+              ))}
+            </View>
           </View>
-        </View>
+        )}
 
-        {/* ── Actions ── */}
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.callBtn}>
-            <Text style={styles.callBtnText}>Call Captain</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            onPress={() => router.back()} 
-            style={[styles.cancelBtn, isBoarded && { opacity: 0.4 }]}
-            disabled={isBoarded}
+          <TouchableOpacity
+            style={[styles.callBtn, { backgroundColor: theme.text }, isSearching && { opacity: 0.3 }]}
+            disabled={isSearching}
           >
-            <Text style={styles.cancelBtnText}>Cancel Ride</Text>
+            <Text style={[styles.callBtnText, { color: theme.background }]}>Call Captain</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={handleCancelRide}
+            style={[styles.cancelBtn, { backgroundColor: theme.card, borderColor: theme.border }, (isBoarded || cancelRideMutation.isPending) && { opacity: 0.4 }]}
+            disabled={isBoarded || cancelRideMutation.isPending}
+          >
+            <Text style={[styles.cancelBtnText, { color: theme.text }]}>
+              {cancelRideMutation.isPending ? 'Cancelling...' : 'Cancel Search'}
+            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* ── Ride Summary ── */}
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>RIDE SUMMARY</Text>
+        <View style={[styles.summaryCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <Text style={[styles.summaryTitle, { color: theme.textSub }]}>RIDE DETAILS</Text>
           {[
-            { label: 'Route', value: `${data.route.from} → ${data.route.to}`, highlight: false },
-            { label: 'Vehicle', value: data.vehicle + (data.is_rideshare ? ' (Shared)' : ''), highlight: false },
-            { label: 'Distance', value: `${data.route.distance_km} km`, highlight: false },
-            { label: 'Fare', value: `₹${data.fare}`, highlight: true },
+            { label: 'Route', value: routeString, highlight: false },
+            { label: 'Vehicle', value: (data?.vehicle || '') + (data?.is_rideshare ? ' (Shared)' : ''), highlight: false },
+            { label: 'Distance', value: 'Tracked via GPS', highlight: false },
+            { label: 'Total Fare', value: 'Calculated at drop-off', highlight: true },
           ].map((row, i) => (
             <View key={i} style={[styles.summaryRow, i < 3 && { marginBottom: 5 }]}>
-              <Text style={styles.summaryLabel}>{row.label}</Text>
+              <Text style={[styles.summaryLabel, { color: theme.textSub }]}>{row.label}</Text>
               <Text style={[
-                styles.summaryValue, 
-                row.highlight && styles.summaryValueHighlight
-              ]}>
+                styles.summaryValue,
+                { color: theme.text },
+                row.highlight && styles.summaryValueHighlight,
+                row.highlight && { color: theme.accent, fontSize: 13 } 
+              ]} numberOfLines={1}>
                 {row.value}
               </Text>
             </View>
@@ -253,43 +455,48 @@ export default function TrackScreen() {
 }
 
 const styles = StyleSheet.create({
-  mapContainer: { margin: 14, height: 195, borderRadius: 18, overflow: 'hidden', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', position: 'relative' },
+  mapContainer: { margin: 14, height: 195, borderRadius: 18, overflow: 'hidden', borderWidth: 0.5, position: 'relative' },
   mapView: { flex: 1 },
-  pickupMarker: { width: 16, height: 16, borderRadius: 8, backgroundColor: 'rgba(190,255,0,0.2)', alignItems: 'center', justifyContent: 'center' },
-  pickupMarkerCore: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#BEFF00' },
-  driverMarker: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#101C12', borderWidth: 2, borderColor: '#BEFF00', justifyContent: 'center', alignItems: 'center' },
-  mapOverlayPill: { position: 'absolute', top: '50%', left: '50%', marginLeft: -40, marginTop: -20, backgroundColor: '#101C12', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#BEFF00' },
-  mapOverlayText: { color: '#BEFF00', fontSize: 11, fontWeight: '700', fontFamily: 'Outfit_700Bold' },
-  mapOverlayRoute: { position: 'absolute', bottom: 10, left: 14, color: 'rgba(255,255,255,0.7)', fontSize: 10, fontFamily: 'Outfit_500Medium', backgroundColor: 'rgba(6,9,10,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  
+  pickupMarker: { width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  pickupMarkerCore: { width: 8, height: 8, borderRadius: 4 },
+  driverMarker: { width: 34, height: 34, borderRadius: 17, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
+  mapOverlayPill: { position: 'absolute', top: '50%', left: '50%', marginLeft: -40, marginTop: -20, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, borderWidth: 1 },
+  mapOverlayText: { fontSize: 11, fontWeight: '700', fontFamily: 'Outfit_700Bold' },
+  mapOverlayRoute: { position: 'absolute', bottom: 10, left: 14, right: 14, fontSize: 10, fontFamily: 'Outfit_500Medium', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+
   sharedBanner: { marginHorizontal: 14, marginBottom: 10, backgroundColor: 'rgba(255,165,0,0.1)', borderWidth: 0.5, borderColor: 'rgba(255,165,0,0.3)', borderRadius: 12, padding: 12 },
   sharedBannerText: { color: 'rgba(255,200,100,0.9)', fontSize: 12, fontFamily: 'Outfit_500Medium', lineHeight: 18 },
-  statusPill: { marginHorizontal: 14, marginBottom: 10, backgroundColor: 'rgba(190,255,0,0.05)', borderWidth: 0.5, borderColor: 'rgba(190,255,0,0.2)', borderRadius: 16, padding: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#BEFF00', marginTop: 2 },
-  statusText: { fontSize: 14, fontWeight: '800', color: '#BEFF00', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.2 },
-  etaText: { fontSize: 11, color: 'rgba(255,255,255,0.5)', fontFamily: 'Outfit_500Medium', marginTop: 2 },
-  otpBox: { backgroundColor: '#BEFF00', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, alignItems: 'center' },
-  otpLabel: { fontSize: 9, color: 'rgba(0,0,0,0.6)', fontFamily: 'Outfit_700Bold', letterSpacing: 1 },
-  otpValue: { fontSize: 16, fontWeight: '900', color: '#060A07', fontFamily: 'Outfit_800ExtraBold', letterSpacing: 2, marginTop: -2 },
-  driverCard: { marginHorizontal: 14, backgroundColor: '#101C12', borderRadius: 19, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', padding: 15 },
-  driverAvatar: { width: 50, height: 50, borderRadius: 15, backgroundColor: '#172018', alignItems: 'center', justifyContent: 'center' },
-  driverInitials: { fontSize: 19, fontWeight: '800', color: '#BEFF00', fontFamily: 'Outfit_800ExtraBold' },
-  driverName: { fontSize: 15, fontWeight: '800', color: '#EEF0E8', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.3 },
-  driverSubText: { fontSize: 11, color: 'rgba(255,255,255,0.38)', fontFamily: 'Outfit_400Regular', marginTop: 2 },
-  plateBox: { backgroundColor: '#172018', borderWidth: 0.5, borderColor: 'rgba(190,255,0,0.2)', borderRadius: 7, paddingHorizontal: 10, paddingVertical: 5 },
-  plateText: { fontSize: 12, fontWeight: '800', color: '#BEFF00', fontFamily: 'Outfit_800ExtraBold', letterSpacing: 1 },
-  statsRow: { flexDirection: 'row', marginTop: 14, paddingTop: 13, borderTopWidth: 0.5, borderTopColor: 'rgba(255,255,255,0.06)' },
-  statValue: { fontSize: 14, fontWeight: '800', color: '#EEF0E8', fontFamily: 'Outfit_800ExtraBold' },
-  statLabel: { fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'Outfit_400Regular', marginTop: 2 },
+  statusPill: { marginHorizontal: 14, marginBottom: 10, borderWidth: 0.5, borderRadius: 16, padding: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  statusDot: { width: 8, height: 8, borderRadius: 4, marginTop: 2 },
+  statusText: { fontSize: 14, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.2 },
+  etaText: { fontSize: 11, fontFamily: 'Outfit_500Medium', marginTop: 2 },
+  otpBox: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, alignItems: 'center' },
+  otpLabel: { fontSize: 9, fontFamily: 'Outfit_700Bold', letterSpacing: 1 },
+  otpValue: { fontSize: 16, fontWeight: '900', fontFamily: 'Outfit_800ExtraBold', letterSpacing: 2, marginTop: -2 },
+
+  searchingCard: { marginHorizontal: 14, borderRadius: 19, borderWidth: 0.5, padding: 24, alignItems: 'center', justifyContent: 'center' },
+  searchingTitle: { fontSize: 18, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold', marginBottom: 4 },
+  searchingSubText: { fontSize: 13, fontFamily: 'Outfit_400Regular', textAlign: 'center', paddingHorizontal: 20 },
+
+  driverCard: { marginHorizontal: 14, borderRadius: 19, borderWidth: 0.5, padding: 15 },
+  driverAvatar: { width: 50, height: 50, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  driverInitials: { fontSize: 19, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold' },
+  driverName: { fontSize: 15, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.3 },
+  driverSubText: { fontSize: 11, fontFamily: 'Outfit_400Regular', marginTop: 2 },
+  plateBox: { borderWidth: 0.5, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 5 },
+  plateText: { fontSize: 12, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold', letterSpacing: 1 },
+  statsRow: { flexDirection: 'row', marginTop: 14, paddingTop: 13, borderTopWidth: 0.5 },
+  statValue: { fontSize: 14, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold' },
+  statLabel: { fontSize: 10, fontFamily: 'Outfit_400Regular', marginTop: 2 },
   actionRow: { flexDirection: 'row', gap: 7, marginHorizontal: 14, marginTop: 9 },
-  callBtn: { flex: 1, backgroundColor: '#EEF0E8', borderRadius: 15, padding: 14, alignItems: 'center' },
-  callBtnText: { fontSize: 13, fontWeight: '800', color: '#060A07', fontFamily: 'Outfit_800ExtraBold' },
-  cancelBtn: { flex: 1, backgroundColor: '#101C12', borderRadius: 15, padding: 14, alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.1)' },
-  cancelBtnText: { fontSize: 13, fontWeight: '700', color: '#EEF0E8', fontFamily: 'Outfit_700Bold' },
-  summaryCard: { marginHorizontal: 14, marginTop: 10, marginBottom: 24, backgroundColor: '#101C12', borderRadius: 17, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.06)', padding: 15 },
-  summaryTitle: { fontSize: 10, color: 'rgba(255,255,255,0.3)', fontFamily: 'Outfit_700Bold', marginBottom: 12, letterSpacing: 0.5 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  summaryLabel: { fontSize: 12, color: 'rgba(255,255,255,0.4)', fontFamily: 'Outfit_400Regular' },
-  summaryValue: { fontSize: 12, fontWeight: '700', color: '#EEF0E8', fontFamily: 'Outfit_700Bold' },
-  summaryValueHighlight: { fontSize: 15, fontWeight: '800', color: '#BEFF00', fontFamily: 'Outfit_800ExtraBold' },
+  callBtn: { flex: 1, borderRadius: 15, padding: 14, alignItems: 'center' },
+  callBtnText: { fontSize: 13, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold' },
+  cancelBtn: { flex: 1, borderRadius: 15, padding: 14, alignItems: 'center', borderWidth: 0.5 },
+  cancelBtnText: { fontSize: 13, fontWeight: '700', fontFamily: 'Outfit_700Bold' },
+  summaryCard: { marginHorizontal: 14, marginTop: 10, marginBottom: 24, borderRadius: 17, borderWidth: 0.5, padding: 15 },
+  summaryTitle: { fontSize: 10, fontFamily: 'Outfit_700Bold', marginBottom: 12, letterSpacing: 0.5 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', overflow: 'hidden' },
+  summaryLabel: { fontSize: 12, fontFamily: 'Outfit_400Regular', width: '25%' },
+  summaryValue: { fontSize: 12, fontWeight: '700', fontFamily: 'Outfit_700Bold', width: '75%', textAlign: 'right' },
+  summaryValueHighlight: { fontSize: 15, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold' },
 });

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, Pressable,
   ActivityIndicator, StyleSheet, TextInput, FlatList, Alert,
-  Keyboard
+  Keyboard, useColorScheme
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -20,28 +20,29 @@ import { useServiceZone } from '../../features/booking/api/useServiceZone';
 import { useBookRide } from '../../features/booking/api/useBookRide'; 
 import { useNearbyDrivers } from '../../features/booking/api/useNearbyDrivers';
 import { SearchIcon } from '../../components/ui/Icons';
+import { themeConfig } from '../../theme'; // Import your theme dictionary
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
-const BackIcon = () => (
+const BackIcon = ({ color }: { color: string }) => (
   <Svg width={16} height={12} viewBox="0 0 16 12" fill="none">
-    <Path d="M14 6H2M2 6L7 1M2 6L7 11" stroke="rgba(255,255,255,0.8)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M14 6H2M2 6L7 1M2 6L7 11" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
-const SwapIcon = () => (
+const SwapIcon = ({ color }: { color: string }) => (
   <Svg width={13} height={14} viewBox="0 0 13 14" fill="none">
-    <Path d="M3 1.5V12.5M3 12.5L1 10.5M3 12.5L5 10.5M10 12.5V1.5M10 1.5L8 3.5M10 1.5L12 3.5" stroke="rgba(190,255,0,0.7)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M3 1.5V12.5M3 12.5L1 10.5M3 12.5L5 10.5M10 12.5V1.5M10 1.5L8 3.5M10 1.5L12 3.5" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
-const PinIcon = ({ color = '#BEFF00' }: { color?: string }) => (
+const PinIcon = ({ color = '#BEFF00', centerColor }: { color?: string, centerColor: string }) => (
   <Svg width={38} height={38} viewBox="0 0 24 24" fill="none">
     <Path d="M12 2C8.13 2 5 5.13 5 9C5 14.25 12 22 12 22C12 22 19 14.25 19 9C19 5.13 15.87 2 12 2Z" fill={color} opacity={0.9} />
-    <Circle cx={12} cy={9} r={3} fill="#06090A" />
+    <Circle cx={12} cy={9} r={3} fill={centerColor} />
   </Svg>
 );
-const MapPinSearchIcon = () => (
+const MapPinSearchIcon = ({ color }: { color: string }) => (
   <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-    <Path d="M12 2C8.13 2 5 5.13 5 9C5 14.25 12 22 12 22C12 22 19 14.25 19 9C19 5.13 15.87 2 12 2Z" stroke="#BEFF00" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-    <Circle cx={12} cy={9} r={2.5} stroke="#BEFF00" strokeWidth={2} />
+    <Path d="M12 2C8.13 2 5 5.13 5 9C5 14.25 12 22 12 22C12 22 19 14.25 19 9C19 5.13 15.87 2 12 2Z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    <Circle cx={12} cy={9} r={2.5} stroke={color} strokeWidth={2} />
   </Svg>
 );
 
@@ -77,6 +78,10 @@ export default function BookScreen() {
   const router  = useRouter();
   const mapRef  = useRef<MapView>(null);
   const dropoffInputRef = useRef<TextInput>(null);
+
+  // ── Theme Hook ──
+  const colorScheme = useColorScheme() || 'dark';
+  const theme = themeConfig[colorScheme];
 
   const [step, setStep]                       = useState<WorkflowStep>('select_pickup');
   const [searchQuery, setSearchQuery]         = useState('');
@@ -166,30 +171,8 @@ export default function BookScreen() {
     drop_lng:   dropoff.longitude,
   } : undefined;
 
-  const { data: rawRouteResponse, 
-    isLoading: isRouteLoading, 
-    isError: isRouteError } = useRouteEstimate(routeCoords);
-    
-    //debug 
-
-    console.log(
-  "RAW ROUTE:",
-  JSON.stringify(rawRouteResponse, null, 2)
-);
-
-console.log(
-  "ROUTE ERROR:",
-  isRouteError
-);
-
+  const { data: rawRouteResponse, isLoading: isRouteLoading, isError: isRouteError } = useRouteEstimate(routeCoords);
   const actualRouteData = extractRouteData(rawRouteResponse);
-
-  //debug
-
-  console.log(
-  "ROUTE RESPONSE:",
-  JSON.stringify(actualRouteData, null, 2)
-);
 
   let routeCoordinates: { latitude: number; longitude: number }[] = [];
   
@@ -223,42 +206,16 @@ console.log(
      routeCoordinates = [pickup, dropoff]; 
   }
 
-  //debug
-
-  console.log(
-  "ROUTE COORDS COUNT:",
-  routeCoordinates.length
-);
-
-console.log(
-  "ROUTE COORDS:",
-  JSON.stringify(routeCoordinates, null, 2)
-);
-
-  const { data: fareData, isLoading: isFareLoading, isError: isFareError } = useFareEstimate(
+  const { data: fareData, isLoading: isFareLoading, isError: isFareError, error: fareError } = useFareEstimate(
     pickup  ? { lat: pickup.latitude,  lng: pickup.longitude,  address: pickup.address  } : undefined,
     dropoff ? { lat: dropoff.latitude, lng: dropoff.longitude, address: dropoff.address } : undefined
   );
 
-useEffect(() => {
-  if (
-    !selectedVehicle &&
-    fareData?.fares &&
-    Object.keys(fareData.fares).length > 0
-  ) {
-    const firstVehicle =
-      Object.keys(fareData.fares)[0];
-
-    console.log(
-      "AUTO SELECTING:",
-      firstVehicle
-    );
-
-    setSelectedVehicle(
-      firstVehicle as VehicleType
-    );
-  }
-}, [fareData]);
+  useEffect(() => {
+    if (!selectedVehicle && fareData?.fares && Object.keys(fareData.fares).length > 0) {
+      setSelectedVehicle(Object.keys(fareData.fares)[0] as VehicleType);
+    }
+  }, [fareData]);
 
   useEffect(() => {
     if (step === 'route_preview' && pickup && dropoff) {
@@ -330,7 +287,6 @@ useEffect(() => {
     
     const vehicleChoice = selectedVehicle || 'bike'; 
     const paymentChoice = 'upi'; 
-
     const backendVehicleType = vehicleChoice === 'shared_auto' ? 'auto' : (vehicleChoice as "bike" | "auto");
 
     try {
@@ -351,34 +307,10 @@ useEffect(() => {
     }
   };
 
-  const availableFares =
-  fareData?.fares || {};
-
-const activeFare =
-  selectedVehicle &&
-  availableFares[selectedVehicle]
+  const availableFares = fareData?.fares || {};
+  const activeFare = selectedVehicle && availableFares[selectedVehicle]
     ? availableFares[selectedVehicle]
-    : Object.values(
-        availableFares
-      )[0];
-
-      //debug 
-
-      console.log(
-  "FARE KEYS:",
-  Object.keys(availableFares)
-);
-
-console.log(
-  "SELECTED VEHICLE:",
-  selectedVehicle
-);
-
-console.log(
-  "ACTIVE FARE:",
-  activeFare
-);
-
+    : Object.values(availableFares)[0];
 
   const rawDistance = actualRouteData?.distance_km    ?? fareData?.distance_km ?? 0;
   const rawDuration = actualRouteData?.duration_mins  ?? fareData?.duration_minutes ?? 0;
@@ -398,20 +330,20 @@ console.log(
     ...(activeFare.waitingFare    > 0 ? [{ label: 'Waiting charge',        value: `₹${activeFare.waitingFare}`    }] : []),
   ] : [];
 
-  const pinColor = step === 'select_pickup' ? '#BEFF00' : '#FF453A';
+  const pinColor = step === 'select_pickup' ? theme.accent : '#FF453A';
   const hasRealRoute = routeCoordinates.length > 2;
 
   if (!currentRegion) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#BEFF00" />
-        <Text style={{ color: 'rgba(255,255,255,0.5)', marginTop: 16, fontFamily: 'Outfit_500Medium' }}>Finding your location...</Text>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={theme.accent} />
+        <Text style={{ color: theme.textSub, marginTop: 16, fontFamily: 'Outfit_500Medium' }}>Finding your location...</Text>
       </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <MapView
         ref={mapRef}
         provider={PROVIDER_DEFAULT}
@@ -430,19 +362,12 @@ console.log(
         {liveDrivers.map((driver, index) => {
           const lat = (driver as any).location?.lat ?? (driver as any).latitude;
           const lng = (driver as any).location?.lng ?? (driver as any).longitude;
-          
           if (!lat || !lng) return null;
-
           const isBike = driver.ride_type === 'BIKE' || driver.vehicle_info?.type === 'bike';
 
           return (
-            <Marker
-              key={driver.driver_id || driver.account_id || `driver-${index}`}
-              coordinate={{ latitude: lat, longitude: lng }}
-              anchor={{ x: 0.5, y: 0.5 }} 
-              zIndex={5}
-            >
-              <View style={styles.vehicleMarker}>
+            <Marker key={driver.driver_id || driver.account_id || `driver-${index}`} coordinate={{ latitude: lat, longitude: lng }} anchor={{ x: 0.5, y: 0.5 }} zIndex={5}>
+              <View style={[styles.vehicleMarker, { backgroundColor: theme.card, borderColor: theme.accent, shadowColor: theme.accent }]}>
                 <Text style={{ fontSize: 16 }}>{isBike ? '🛵' : '🛺'}</Text>
               </View>
             </Marker>
@@ -450,7 +375,7 @@ console.log(
         })}
 
         {pickup && step !== 'select_pickup' && (
-          <Marker coordinate={pickup} pinColor="#BEFF00" title="Pickup" zIndex={10} />
+          <Marker coordinate={pickup} pinColor={theme.accent} title="Pickup" zIndex={10} />
         )}
 
         {step === 'route_preview' && pickup && dropoff && (
@@ -472,7 +397,7 @@ console.log(
       {step !== 'route_preview' && !isSearchFocused && (
         <View style={styles.centerPin} pointerEvents="none">
           <View style={{ transform: [{ translateY: mapMoving ? -10 : 0 }] }}>
-            <PinIcon color={pinColor} />
+            <PinIcon color={pinColor} centerColor={theme.background} />
           </View>
           <View style={[styles.pinShadow, mapMoving && { opacity: 0.3, transform: [{ scaleX: 0.7 }] }]} />
         </View>
@@ -480,35 +405,35 @@ console.log(
 
       <SafeAreaView style={styles.header} pointerEvents="box-none">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 10 }}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
-            <BackIcon />
+          <TouchableOpacity onPress={handleBack} style={[styles.backBtn, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <BackIcon color={theme.text} />
           </TouchableOpacity>
-          <Text style={{ fontSize: 17, fontWeight: '800', color: '#EEF0E8', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.4 }}>
+          <Text style={{ fontSize: 17, fontWeight: '800', color: theme.text, fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.4 }}>
             {step === 'route_preview' ? 'Plan your ride' : 'Select location'}
           </Text>
         </View>
 
         {step !== 'route_preview' && (
-          <View style={styles.searchCard}>
-            <View style={[styles.inputRow, step === 'select_pickup' && styles.activeInput]}>
-              <View style={[styles.dot, { backgroundColor: '#BEFF00' }]} />
+          <View style={[styles.searchCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={[styles.inputRow, { backgroundColor: theme.background, borderColor: step === 'select_pickup' ? theme.accent : theme.border }]}>
+              <View style={[styles.dot, { backgroundColor: theme.accent }]} />
               <TextInput
-                style={styles.input}
+                style={[styles.input, { color: theme.text }]}
                 placeholder="Enter pickup location..."
-                placeholderTextColor="rgba(255,255,255,0.3)"
+                placeholderTextColor={theme.textSub}
                 value={pickup && step !== 'select_pickup' ? pickup.address : searchQuery}
                 onChangeText={(t) => { setSearchQuery(t); if (pickup) setPickup(null); }}
                 onFocus={() => { setStep('select_pickup'); setIsSearchFocused(true); }}
               />
             </View>
             
-            <View style={[styles.inputRow, step === 'select_dropoff' && styles.activeInput, { marginTop: 8 }]}>
+            <View style={[styles.inputRow, { marginTop: 8, backgroundColor: theme.background, borderColor: step === 'select_dropoff' ? theme.accent : theme.border }]}>
               <View style={[styles.dot, { backgroundColor: '#FF453A' }]} />
               <TextInput
                 ref={dropoffInputRef}
-                style={styles.input}
+                style={[styles.input, { color: theme.text }]}
                 placeholder="Where to?"
-                placeholderTextColor="rgba(255,255,255,0.3)"
+                placeholderTextColor={theme.textSub}
                 value={dropoff && step !== 'select_dropoff' ? dropoff.address : searchQuery}
                 onChangeText={(t) => { setSearchQuery(t); if (dropoff) setDropoff(null); }}
                 onFocus={() => { setStep('select_dropoff'); setIsSearchFocused(true); }}
@@ -518,45 +443,42 @@ console.log(
         )}
 
         {step === 'route_preview' && pickup && dropoff && (
-          <View style={styles.routePill}>
-            <View style={[styles.dot, { backgroundColor: '#BEFF00' }]} />
-            <Text style={styles.routeText} numberOfLines={1}>{pickup.address}</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.3)', marginHorizontal: 4 }}>→</Text>
-            <Text style={styles.routeText} numberOfLines={1}>{dropoff.address}</Text>
+          <View style={[styles.routePill, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={[styles.dot, { backgroundColor: theme.accent }]} />
+            <Text style={[styles.routeText, { color: theme.text }]} numberOfLines={1}>{pickup.address}</Text>
+            <Text style={{ color: theme.textSub, marginHorizontal: 4 }}>→</Text>
+            <Text style={[styles.routeText, { color: theme.text }]} numberOfLines={1}>{dropoff.address}</Text>
             <TouchableOpacity onPress={() => { setStep('select_pickup'); setIsSearchFocused(true); }} style={{ marginLeft: 8 }}>
-              <SwapIcon />
+              <SwapIcon color={theme.accent} />
             </TouchableOpacity>
           </View>
         )}
 
         {isSearchFocused && (
-          <View style={styles.autocomplete}>
+          <View style={[styles.autocomplete, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <TouchableOpacity 
-              style={styles.setOnMapBtn} 
-              onPress={() => {
-                setIsSearchFocused(false);
-                Keyboard.dismiss();
-              }}
+              style={[styles.setOnMapBtn, { borderBottomColor: theme.border }]} 
+              onPress={() => { setIsSearchFocused(false); Keyboard.dismiss(); }}
             >
-              <View style={styles.setOnMapIconBox}>
-                <MapPinSearchIcon />
+              <View style={[styles.setOnMapIconBox, { backgroundColor: theme.accentSoft }]}>
+                <MapPinSearchIcon color={theme.accent} />
               </View>
-              <Text style={styles.setOnMapText}>Set location on map</Text>
+              <Text style={[styles.setOnMapText, { color: theme.accent }]}>Set location on map</Text>
             </TouchableOpacity>
 
             {isSearchLoading ? (
-              <ActivityIndicator size="small" color="#BEFF00" style={{ padding: 20 }} />
+              <ActivityIndicator size="small" color={theme.accent} style={{ padding: 20 }} />
             ) : (
               <FlatList
                 data={searchResults}
                 keyExtractor={(item) => item.place_id}
                 keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (
-                  <TouchableOpacity style={styles.resultRow} onPress={() => handleSelectSearchResult(item)}>
-                    <SearchIcon />
+                  <TouchableOpacity style={[styles.resultRow, { borderBottomColor: theme.border }]} onPress={() => handleSelectSearchResult(item)}>
+                    <SearchIcon color={theme.textSub} />
                     <View style={{ marginLeft: 10, flex: 1 }}>
-                      <Text style={styles.resultName} numberOfLines={1}>{item.name}</Text>
-                      <Text style={styles.resultSub} numberOfLines={1}>{item.address}</Text>
+                      <Text style={[styles.resultName, { color: theme.text }]} numberOfLines={1}>{item.name}</Text>
+                      <Text style={[styles.resultSub, { color: theme.textSub }]} numberOfLines={1}>{item.address}</Text>
                     </View>
                   </TouchableOpacity>
                 )}
@@ -567,86 +489,81 @@ console.log(
       </SafeAreaView>
 
       {!isSearchFocused && (
-        <View style={styles.drawer}>
+        <View style={[styles.drawer, { backgroundColor: theme.card, borderColor: theme.border }]}>
           {step !== 'route_preview' ? (
             <View>
-              <Text style={styles.drawerTitle}>
+              <Text style={[styles.drawerTitle, { color: theme.text }]}>
                 {step === 'select_pickup' ? 'Confirm pickup spot' : 'Confirm destination'}
               </Text>
-              <Text style={styles.drawerSub} numberOfLines={2}>
+              <Text style={[styles.drawerSub, { color: theme.textSub }]} numberOfLines={2}>
                 {mapMoving ? 'Locating...' : pinAddress}
               </Text>
-              <TouchableOpacity onPress={handleConfirmLocation} disabled={mapMoving} style={[styles.actionBtn, mapMoving && { opacity: 0.5 }]}>
-                <Text style={styles.actionBtnText}>{mapMoving ? 'Locating…' : 'Confirm Location'}</Text>
+              <TouchableOpacity onPress={handleConfirmLocation} disabled={mapMoving} style={[styles.actionBtn, { backgroundColor: theme.accent }, mapMoving && { opacity: 0.5 }]}>
+                <Text style={[styles.actionBtnText, { color: theme.background }]}>{mapMoving ? 'Locating…' : 'Confirm Location'}</Text>
               </TouchableOpacity>
             </View>
           ) : (
-            // 🚀 NEW DIAGNOSTIC UI: Split out the specific error conditions
             (isFareLoading || isRouteLoading) ? (
               <View style={{ paddingVertical: 50, alignItems: 'center', justifyContent: 'center' }}>
-                <ActivityIndicator size="large" color="#BEFF00" />
-                <Text style={{ color: 'rgba(255,255,255,0.5)', marginTop: 16, fontFamily: 'Outfit_500Medium' }}>Calculating fares...</Text>
+                <ActivityIndicator size="large" color={theme.accent} />
+                <Text style={{ color: theme.textSub, marginTop: 16, fontFamily: 'Outfit_500Medium' }}>Calculating fares...</Text>
               </View>
               
             ) : isRouteError ? (
               <View style={{ paddingVertical: 50, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontSize: 16, color: '#FF8080', fontFamily: 'Outfit_700Bold', textAlign: 'center' }}>❌ useRouteEstimate Hook Failed</Text>
-                <TouchableOpacity onPress={() => handleBack()} style={[styles.actionBtn, { paddingHorizontal: 24, height: 44, marginTop: 20, backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-                  <Text style={[styles.actionBtnText, { color: 'white' }]}>Go Back</Text>
+                <TouchableOpacity onPress={() => handleBack()} style={[styles.actionBtn, { backgroundColor: theme.border, paddingHorizontal: 24, height: 44, marginTop: 20 }]}>
+                  <Text style={[styles.actionBtnText, { color: theme.text }]}>Go Back</Text>
                 </TouchableOpacity>
               </View>
               
             ) : isFareError ? (
               <View style={{ paddingVertical: 50, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontSize: 16, color: '#FF8080', fontFamily: 'Outfit_700Bold', textAlign: 'center' }}>❌ useFareEstimate Hook Failed</Text>
-                <TouchableOpacity onPress={() => handleBack()} style={[styles.actionBtn, { paddingHorizontal: 24, height: 44, marginTop: 20, backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-                  <Text style={[styles.actionBtnText, { color: 'white' }]}>Go Back</Text>
+                <TouchableOpacity onPress={() => handleBack()} style={[styles.actionBtn, { backgroundColor: theme.border, paddingHorizontal: 24, height: 44, marginTop: 20 }]}>
+                  <Text style={[styles.actionBtnText, { color: theme.text }]}>Go Back</Text>
                 </TouchableOpacity>
               </View>
               
             ) : !fareData ? (
               <View style={{ paddingVertical: 50, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontSize: 16, color: '#FF8080', fontFamily: 'Outfit_700Bold', textAlign: 'center' }}>❌ fareData is Null or Empty</Text>
-                <TouchableOpacity onPress={() => handleBack()} style={[styles.actionBtn, { paddingHorizontal: 24, height: 44, marginTop: 20, backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-                  <Text style={[styles.actionBtnText, { color: 'white' }]}>Go Back</Text>
+                <TouchableOpacity onPress={() => handleBack()} style={[styles.actionBtn, { backgroundColor: theme.border, paddingHorizontal: 24, height: 44, marginTop: 20 }]}>
+                  <Text style={[styles.actionBtnText, { color: theme.text }]}>Go Back</Text>
                 </TouchableOpacity>
               </View>
               
             ) : !activeFare ? (
               <View style={{ paddingVertical: 50, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontSize: 16, color: '#FF8080', fontFamily: 'Outfit_700Bold', textAlign: 'center' }}>❌ activeFare Undefined (Vehicle Key Mismatch)</Text>
-                <Text style={{ color: 'white', fontSize: 12, marginTop: 4 }}>Selected: {selectedVehicle}</Text>
-                <TouchableOpacity onPress={() => handleBack()} style={[styles.actionBtn, { paddingHorizontal: 24, height: 44, marginTop: 20, backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-                  <Text style={[styles.actionBtnText, { color: 'white' }]}>Go Back</Text>
+                <Text style={{ color: theme.text, fontSize: 12, marginTop: 4 }}>Selected: {selectedVehicle}</Text>
+                <TouchableOpacity onPress={() => handleBack()} style={[styles.actionBtn, { backgroundColor: theme.border, paddingHorizontal: 24, height: 44, marginTop: 20 }]}>
+                  <Text style={[styles.actionBtnText, { color: theme.text }]}>Go Back</Text>
                 </TouchableOpacity>
               </View>
 
             ) : (
               <View>
-                <TouchableOpacity 
-                  activeOpacity={0.8} 
-                  onPress={() => setIsDetailsExpanded(!isDetailsExpanded)} 
-                  style={styles.dragHandleContainer}
-                >
-                  <View style={styles.dragHandleBar} />
-                  <Text style={styles.toggleText}>
+                <TouchableOpacity activeOpacity={0.8} onPress={() => setIsDetailsExpanded(!isDetailsExpanded)} style={styles.dragHandleContainer}>
+                  <View style={[styles.dragHandleBar, { backgroundColor: theme.border }]} />
+                  <Text style={[styles.toggleText, { color: theme.accent }]}>
                     {isDetailsExpanded ? '▼ Hide Fare Breakdown' : '▲ Show Fare Breakdown'}
                   </Text>
                 </TouchableOpacity>
 
                 <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: isDetailsExpanded ? 400 : 180 }}>
-                  <View style={styles.infoStrip}>
+                  <View style={[styles.infoStrip, { backgroundColor: theme.background, borderColor: theme.border }]}>
                     {[
                       { value: isRouteLoading ? '...' : `${displayDistance} km`,  label: 'Distance'  },
                       { value: isRouteLoading ? '...' : `~${displayDuration} min`, label: 'Est. time' },
-                      { value: 'UPI',                                               label: 'Payment'   },
+                      { value: 'UPI',                                              label: 'Payment'   },
                     ].map((item, i, arr) => (
                       <View key={i} style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                         <View style={{ flex: 1, alignItems: 'center' }}>
-                          <Text style={{ fontSize: 15, fontWeight: '800', color: '#EEF0E8', fontFamily: 'Outfit_800ExtraBold' }}>{item.value}</Text>
-                          <Text style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'Outfit_400Regular', marginTop: 2 }}>{item.label}</Text>
+                          <Text style={{ fontSize: 15, fontWeight: '800', color: theme.text, fontFamily: 'Outfit_800ExtraBold' }}>{item.value}</Text>
+                          <Text style={{ fontSize: 10, color: theme.textSub, fontFamily: 'Outfit_400Regular', marginTop: 2 }}>{item.label}</Text>
                         </View>
-                        {i < arr.length - 1 && <View style={{ width: 0.5, height: 28, backgroundColor: 'rgba(255,255,255,0.06)' }} />}
+                        {i < arr.length - 1 && <View style={{ width: 0.5, height: 28, backgroundColor: theme.border }} />}
                       </View>
                     ))}
                   </View>
@@ -654,13 +571,13 @@ console.log(
                   {isOutOfZone && isDetailsExpanded && (
                     <View style={{ backgroundColor: 'rgba(255,80,80,0.08)', borderWidth: 0.5, borderColor: 'rgba(255,80,80,0.2)', borderRadius: 12, padding: 14, marginBottom: 12, marginTop: 12 }}>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#FF8080', fontFamily: 'Outfit_700Bold' }}>⚠️ Service not available</Text>
-                      <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: 'Outfit_400Regular', marginTop: 4, lineHeight: 16 }}>
+                      <Text style={{ fontSize: 11, color: theme.textSub, fontFamily: 'Outfit_400Regular', marginTop: 4, lineHeight: 16 }}>
                         Your pickup is outside Rydo's service area. Please select a spot inside our coverage zones.
                       </Text>
                     </View>
                   )}
 
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#EEF0E8', fontFamily: 'Outfit_700Bold', marginTop: 14, marginBottom: 8 }}>Choose vehicle</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text, fontFamily: 'Outfit_700Bold', marginTop: 14, marginBottom: 8 }}>Choose vehicle</Text>
                   
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7, paddingBottom: 4 }}>
                     {VEHICLES.map((v) => {
@@ -670,16 +587,16 @@ console.log(
                         <Pressable
                           key={v.id}
                           onPress={() => setSelectedVehicle(v.id)}
-                          style={{ backgroundColor: active ? 'rgba(190,255,0,0.08)' : '#06090A', borderWidth: 0.5, borderColor: active ? 'rgba(190,255,0,0.4)' : 'rgba(255,255,255,0.08)', borderRadius: 14, padding: 11, alignItems: 'center', gap: 4, minWidth: 96 }}
+                          style={{ backgroundColor: active ? theme.accentSoft : theme.background, borderWidth: 0.5, borderColor: active ? theme.accent : theme.border, borderRadius: 14, padding: 11, alignItems: 'center', gap: 4, minWidth: 96 }}
                         >
                           <Text style={{ fontSize: 20 }}>{v.icon}</Text>
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#EEF0E8', fontFamily: 'Outfit_700Bold' }}>{v.label}</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text, fontFamily: 'Outfit_700Bold' }}>{v.label}</Text>
                           
                           <View style={{ alignItems: 'center' }}>
                             {fare?.standardTotal && fare.standardTotal > fare.total && (
                               <Text style={styles.crossedOutPrice}>₹{fare.standardTotal}</Text>
                             )}
-                            <Text style={{ fontSize: 12, color: active ? '#BEFF00' : 'rgba(255,255,255,0.38)', fontFamily: 'Outfit_700Bold' }}>
+                            <Text style={{ fontSize: 12, color: active ? theme.accent : theme.textSub, fontFamily: 'Outfit_700Bold' }}>
                               ₹{fare?.total || '--'}{v.id === 'shared_auto' ? '/seat' : ''}
                             </Text>
                             {fare?.isLaunchRate && (
@@ -692,29 +609,29 @@ console.log(
                   </ScrollView>
 
                   {isDetailsExpanded && activeFare && (
-                    <View style={styles.fareCard}>
+                    <View style={[styles.fareCard, { backgroundColor: theme.background, borderColor: theme.border }]}>
                       {fareRows.map((row, i) => (
                         <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-                          <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)', fontFamily: 'Outfit_400Regular' }}>{row.label}</Text>
-                          <Text style={{ fontSize: 12, fontWeight: '600', color: '#EEF0E8', fontFamily: 'Outfit_600SemiBold' }}>{row.value}</Text>
+                          <Text style={{ fontSize: 12, color: theme.textSub, fontFamily: 'Outfit_400Regular' }}>{row.label}</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: theme.text, fontFamily: 'Outfit_600SemiBold' }}>{row.value}</Text>
                         </View>
                       ))}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-                        <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', fontFamily: 'Outfit_400Regular' }}>TDS (Sec 194-O, 1% Config)</Text>
-                        <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', fontFamily: 'Outfit_400Regular' }}>₹{activeFare.tds} deduction</Text>
+                        <Text style={{ fontSize: 11, color: theme.textSub, fontFamily: 'Outfit_400Regular' }}>TDS (Sec 194-O, 1% Config)</Text>
+                        <Text style={{ fontSize: 11, color: theme.textSub, fontFamily: 'Outfit_400Regular' }}>₹{activeFare.tds} deduction</Text>
                       </View>
                     </View>
                   )}
 
-                  <View style={styles.summaryTotalRow}>
-                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#EEF0E8', fontFamily: 'Outfit_600SemiBold' }}>Total Ride Price</Text>
+                  <View style={[styles.summaryTotalRow, { borderTopColor: theme.border }]}>
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: theme.text, fontFamily: 'Outfit_600SemiBold' }}>Total Ride Price</Text>
                     <View style={{ alignItems: 'flex-end' }}>
                       {activeFare.standardTotal && activeFare.standardTotal > activeFare.total && (
                         <Text style={[styles.crossedOutPrice, { fontSize: 14, marginBottom: 0 }]}>
                           ₹{activeFare.standardTotal}
                         </Text>
                       )}
-                      <Text style={{ fontSize: 24, fontWeight: '800', color: '#BEFF00', fontFamily: 'Outfit_800ExtraBold' }}>
+                      <Text style={{ fontSize: 24, fontWeight: '800', color: theme.accent, fontFamily: 'Outfit_800ExtraBold' }}>
                         ₹{activeFare.total}
                       </Text>
                     </View>
@@ -723,9 +640,9 @@ console.log(
                   <TouchableOpacity 
                     onPress={handleConfirmRide} 
                     disabled={isBookingLive || !!isOutOfZone} 
-                    style={[styles.actionBtn, (isBookingLive || !!isOutOfZone) && { opacity: 0.4 }]}
+                    style={[styles.actionBtn, { backgroundColor: theme.accent }, (isBookingLive || !!isOutOfZone) && { opacity: 0.4 }]}
                   >
-                    {isBookingLive ? <ActivityIndicator color="#060A07" /> : <Text style={styles.actionBtnText}>Confirm Ride Match</Text>}
+                    {isBookingLive ? <ActivityIndicator color={theme.background} /> : <Text style={[styles.actionBtnText, { color: theme.background }]}>Confirm Ride Match</Text>}
                   </TouchableOpacity>
                 </ScrollView>
               </View>
@@ -738,38 +655,37 @@ console.log(
 }
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#06090A' },
+  container:    { flex: 1 },
   centerPin:    { position: 'absolute', top: '50%', left: '50%', marginTop: -38, marginLeft: -19, alignItems: 'center', zIndex: 99 },
   pinShadow:    { width: 8, height: 4, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 4, marginTop: 1 },
   header:       { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100, paddingHorizontal: 14, paddingTop: 52 },
-  backBtn:      { width: 36, height: 36, backgroundColor: '#101C12', borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.1)' },
-  searchCard:   { backgroundColor: '#101C12', borderRadius: 18, padding: 12, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)' },
-  inputRow:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#06090A', borderRadius: 11, paddingHorizontal: 12, height: 44, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.05)' },
-  activeInput:  { borderColor: '#BEFF00' },
+  backBtn:      { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 0.5 },
+  searchCard:   { borderRadius: 18, padding: 12, borderWidth: 0.5 },
+  inputRow:     { flexDirection: 'row', alignItems: 'center', borderRadius: 11, paddingHorizontal: 12, height: 44, borderWidth: 0.5 },
   dot:          { width: 8, height: 8, borderRadius: 4, marginRight: 10 },
-  input:        { flex: 1, color: '#EEF0E8', fontSize: 14, fontFamily: 'Outfit_500Medium' },
-  routePill:    { backgroundColor: '#101C12', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)' },
-  routeText:    { flex: 1, color: '#EEF0E8', fontSize: 12, fontFamily: 'Outfit_500Medium' },
-  autocomplete: { backgroundColor: '#101C12', borderRadius: 16, marginTop: 6, maxHeight: 250, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 6 },
+  input:        { flex: 1, fontSize: 14, fontFamily: 'Outfit_500Medium' },
+  routePill:    { borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 0.5 },
+  routeText:    { flex: 1, fontSize: 12, fontFamily: 'Outfit_500Medium' },
+  autocomplete: { borderRadius: 16, marginTop: 6, maxHeight: 250, borderWidth: 0.5, paddingHorizontal: 6 },
   
-  setOnMapBtn:  { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.08)' },
-  setOnMapIconBox: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(190,255,0,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  setOnMapText: { color: '#BEFF00', fontSize: 14, fontFamily: 'Outfit_600SemiBold' },
+  setOnMapBtn:  { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 0.5 },
+  setOnMapIconBox: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  setOnMapText: { fontSize: 14, fontFamily: 'Outfit_600SemiBold' },
 
-  resultRow:    { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 10, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.04)' },
-  resultName:   { color: '#EEF0E8', fontSize: 13, fontFamily: 'Outfit_600SemiBold' },
-  resultSub:    { color: 'rgba(255,255,255,0.35)', fontSize: 10, marginTop: 2 },
-  drawer:       { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#101C12', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 32, borderTopWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)' },
-  drawerTitle:  { color: '#EEF0E8', fontSize: 17, fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.3, marginTop: 10 },
-  drawerSub:    { color: 'rgba(255,255,255,0.38)', fontSize: 12, marginTop: 5, lineHeight: 18, fontFamily: 'Outfit_400Regular' },
+  resultRow:    { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 10, borderBottomWidth: 0.5 },
+  resultName:   { fontSize: 13, fontFamily: 'Outfit_600SemiBold' },
+  resultSub:    { fontSize: 10, marginTop: 2 },
+  drawer:       { position: 'absolute', bottom: 0, left: 0, right: 0, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 32, borderTopWidth: 0.5 },
+  drawerTitle:  { fontSize: 17, fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.3, marginTop: 10 },
+  drawerSub:    { fontSize: 12, marginTop: 5, lineHeight: 18, fontFamily: 'Outfit_400Regular' },
   dragHandleContainer: { width: '100%', alignItems: 'center', paddingVertical: 8, marginBottom: 6 },
-  dragHandleBar: { width: 44, height: 4, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 2 },
-  toggleText:   { color: 'rgba(190,255,0,0.7)', fontSize: 10, fontFamily: 'Outfit_600SemiBold', marginTop: 5, letterSpacing: 0.3 },
-  actionBtn:    { backgroundColor: '#BEFF00', borderRadius: 16, height: 54, justifyContent: 'center', alignItems: 'center', marginTop: 12 },
-  actionBtnText:{ color: '#060A07', fontSize: 15, fontFamily: 'Outfit_800ExtraBold' },
-  infoStrip:    { backgroundColor: '#06090A', borderRadius: 12, padding: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.06)' },
-  fareCard:     { marginTop: 12, backgroundColor: '#06090A', borderRadius: 17, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', padding: 13 },
-  summaryTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, marginTop: 10, borderTopWidth: 0.5, borderTopColor: 'rgba(255,255,255,0.08)' },
+  dragHandleBar: { width: 44, height: 4, borderRadius: 2 },
+  toggleText:   { fontSize: 10, fontFamily: 'Outfit_600SemiBold', marginTop: 5, letterSpacing: 0.3 },
+  actionBtn:    { borderRadius: 16, height: 54, justifyContent: 'center', alignItems: 'center', marginTop: 12 },
+  actionBtnText:{ fontSize: 15, fontFamily: 'Outfit_800ExtraBold' },
+  infoStrip:    { borderRadius: 12, padding: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 0.5 },
+  fareCard:     { marginTop: 12, borderRadius: 17, borderWidth: 0.5, padding: 13 },
+  summaryTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, marginTop: 10, borderTopWidth: 0.5 },
 
   crossedOutPrice: {
     fontSize: 11,
@@ -789,13 +705,10 @@ const styles = StyleSheet.create({
   vehicleMarker: {
     width: 36, 
     height: 36, 
-    backgroundColor: '#101C12',
     borderRadius: 18,
     alignItems: 'center', 
     justifyContent: 'center',
     borderWidth: 2, 
-    borderColor: '#BEFF00', 
-    shadowColor: '#BEFF00',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
     shadowRadius: 4,

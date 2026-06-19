@@ -10,7 +10,7 @@ export interface PlaceSearchResult {
 }
 
 // ── Secure Backend Parser ──────────────────────────────────────────────────
-// Parses Nakshathra's ApiResponse: { success: true, data: [ ...results ] }
+// Parses ApiResponse: { success: true, data: [ ...results ] }
 function parseResults(response: any): PlaceSearchResult[] {
   if (!response) return [];
 

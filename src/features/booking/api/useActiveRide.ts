@@ -1,25 +1,30 @@
-// src/features/booking/api/useActiveRide.ts
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../../../lib/apiClient';
 
-// ── Aligning with the PassengerStatus enum from your backend ──
-export type PassengerStatus = 'SEARCHING' | 'ACCEPTED' | 'ARRIVED' | 'BOARDED' | 'COMPLETED' | 'CANCELLED';
+export type PassengerStatus =
+  | 'SEARCHING'
+  | 'ACCEPTED'
+  | 'ARRIVED'
+  | 'BOARDED'
+  | 'COMPLETED'
+  | 'CANCELLED';
 
 export interface ActiveRideData {
   id: string;
   status: PassengerStatus;
   status_text: string;
   eta_minutes: number;
-  
-  // ── Multi-Tenant Fields ──
   is_rideshare: boolean;
   detour_km?: number;
   otp?: string;
-
+  pickup: {
+    location: { lat: number; lng: number };
+  };
   route: {
     from: string;
     to: string;
     distance_km: number;
+    coords: { latitude: number; longitude: number }[];
   };
   vehicle: string;
   fare: number;
@@ -38,19 +43,20 @@ export function useActiveRide() {
     queryKey: ['activeRide'],
     queryFn: async (): Promise<ActiveRideData | null> => {
       try {
-        // Ping the backend to get the user's current active passenger container
         const res = await apiClient.get('/users/rides/current');
-        
-        // Return the payload exactly as the backend formatted it
         return res.data?.data || res.data;
       } catch (error: any) {
-        // If the backend says 404, it just means they aren't on a ride right now. 
-        // Don't crash, just return null.
-        if (error.response?.status === 404) {
-          return null;
-        }
+        if (error.response?.status === 404) return null;
         throw error;
       }
-    }, 
+    },
+    // ✅ FIX: Poll every 8 seconds as a fallback safety net.
+    // If a socket event is missed, the UI self-corrects within 8s.
+    refetchInterval: 8000,
+    // ✅ FIX: Don't serve stale data. Always re-fetch on focus/mount.
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 }

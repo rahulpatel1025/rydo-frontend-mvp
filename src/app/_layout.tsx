@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useColorScheme } from 'react-native'; // 1. Import the hook
 import { Stack, useRouter, useSegments, Slot } from 'expo-router';
 import { useFonts } from 'expo-font';
 import {
@@ -11,7 +12,8 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
-import { AuthProvider, useAuth } from '../lib/auth-context'; // Ensure this path is correct
+import { AuthProvider, useAuth } from '../lib/auth-context';
+import { themeConfig } from '../theme'; // 2. Import your theme dictionary
 import "../../global.css";
 
 SplashScreen.preventAutoHideAsync();
@@ -23,6 +25,10 @@ function RootLayoutNav() {
   const { session, isLoading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+
+  // 3. Grab the active theme for the Stack backgrounds
+  const colorScheme = useColorScheme() || 'dark';
+  const theme = themeConfig[colorScheme];
 
   useEffect(() => {
     if (isLoading) return;
@@ -39,7 +45,8 @@ function RootLayoutNav() {
   }, [session, segments, isLoading]);
 
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#06090A' } }}>
+    // 4. Inject the dynamic background color here
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="intro" options={{ animation: 'none' }} />
       <Stack.Screen name="(auth)" />
@@ -57,6 +64,10 @@ export default function RootLayout() {
     Outfit_800ExtraBold,
   });
 
+  // 5. Grab the theme again for the StatusBar
+  const colorScheme = useColorScheme() || 'dark';
+  const theme = themeConfig[colorScheme];
+
   useEffect(() => {
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync();
@@ -68,7 +79,11 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClient}>
-        <StatusBar style="light" backgroundColor="#06090A" />
+        {/* 6. Make the status bar icons auto-flip (dark icons on light mode, light icons on dark mode) */}
+        <StatusBar 
+          style={colorScheme === 'dark' ? 'light' : 'dark'} 
+          backgroundColor={theme.background} 
+        />
         <RootLayoutNav />
       </QueryClientProvider>
     </AuthProvider>

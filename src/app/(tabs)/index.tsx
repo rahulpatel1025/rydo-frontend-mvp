@@ -1,5 +1,6 @@
+// src/app/(tabs)/index.tsx
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Pressable, ActivityIndicator, StyleSheet, TextInput, FlatList } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Pressable, ActivityIndicator, StyleSheet, TextInput, FlatList, useColorScheme } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
@@ -8,8 +9,9 @@ import * as Location from 'expo-location';
 // Imports from our cleanly separated architecture
 import { useHomeData, VehicleType } from '../../features/booking/api/useHomeData';
 import { useNearbyDrivers, NearbyDriver } from '../../features/booking/api/useNearbyDrivers';
-import { useLocationSearch, PlaceSearchResult } from '../../features/booking/api/useLocationSearch'; // ── NEW: Real Search ──
+import { useLocationSearch, PlaceSearchResult } from '../../features/booking/api/useLocationSearch'; 
 import { SearchIcon, PlusIcon, BikeIcon, AutoIcon, SharedAutoIcon } from '../../components/ui/Icons';
+import { themeConfig } from '../../theme'; // Import your theme dictionary
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -21,6 +23,10 @@ export default function HomeScreen() {
     longitudeDelta: 0.01,
   });
   
+  // ── Theme Hook ──
+  const colorScheme = useColorScheme() || 'dark';
+  const theme = themeConfig[colorScheme];
+
   // ── Search State ──
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -66,26 +72,24 @@ export default function HomeScreen() {
     })();
   }, []);
 
+  // ── Dynamic Tag Colors ──
   const tagColors = {
-    primary: { bg: 'rgba(190,255,0,0.1)',  text: '#BEFF00' },
-    faint:   { bg: 'rgba(255,255,255,0.05)', text: 'rgba(255,255,255,0.3)' },
-    muted:   { bg: 'rgba(255,255,255,0.05)', text: 'rgba(255,255,255,0.3)' },
+    primary: { bg: theme.accentSoft,  text: theme.accent },
+    faint:   { bg: theme.border,      text: theme.textSub },
+    muted:   { bg: theme.border,      text: theme.textSub },
   };
 
   const handleSelectSearchResult = (item: PlaceSearchResult) => {
     setIsSearchFocused(false);
     setSearchQuery('');
-    
-    // In the future, we can pass `item` to book.tsx via expo-router params
-    // For now, we clear the overlay and push to the booking flow
     router.push('/(tabs)/book');
   };
 
   // Loading State
   if (isLoading || !data) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#BEFF00" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={theme.accent} />
       </SafeAreaView>
     );
   }
@@ -93,8 +97,8 @@ export default function HomeScreen() {
   // Error / Out of Service Area State
   if (isError || !data?.is_serviceable) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-        <Text style={{ color: '#EEF0E8', fontSize: 18, fontFamily: 'Outfit_700Bold', textAlign: 'center' }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Text style={{ color: theme.text, fontSize: 18, fontFamily: 'Outfit_700Bold', textAlign: 'center' }}>
           RYDO is not available in your area yet.
         </Text>
       </SafeAreaView>
@@ -102,15 +106,15 @@ export default function HomeScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
         {/* ── Greeting ── */}
         <View style={{ paddingHorizontal: 18, paddingTop: 14 }}>
-          <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)', fontFamily: 'Outfit_400Regular' }}>
+          <Text style={{ fontSize: 12, color: theme.textSub, fontFamily: 'Outfit_400Regular' }}>
             Good afternoon
           </Text>
-          <Text style={{ fontSize: 23, fontWeight: '800', color: '#EEF0E8', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.5, marginTop: 3, lineHeight: 28 }}>
+          <Text style={{ fontSize: 23, fontWeight: '800', color: theme.text, fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.5, marginTop: 3, lineHeight: 28 }}>
             Where to, Rahul?
           </Text>
         </View>
@@ -119,46 +123,46 @@ export default function HomeScreen() {
         <View style={{ marginHorizontal: 14, marginTop: 12, zIndex: 50 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <View
-              style={{ flex: 1, backgroundColor: '#101C12', borderWidth: 0.5, borderColor: isSearchFocused ? '#BEFF00' : 'rgba(255,255,255,0.1)', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+              style={{ flex: 1, backgroundColor: theme.card, borderWidth: 0.5, borderColor: isSearchFocused ? theme.accent : theme.border, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', gap: 10 }}
             >
-              <SearchIcon />
+              <SearchIcon color={isSearchFocused ? theme.accent : theme.textSub} />
               <TextInput
-                style={{ fontSize: 13, color: '#EEF0E8', fontFamily: 'Outfit_400Regular', flex: 1 }}
+                style={{ fontSize: 13, color: theme.text, fontFamily: 'Outfit_400Regular', flex: 1 }}
                 placeholder="Search destination…"
-                placeholderTextColor="rgba(255,255,255,0.3)"
+                placeholderTextColor={theme.textSub}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 onFocus={() => setIsSearchFocused(true)}
                 onBlur={() => {
-                  // Slight delay to allow tap on result before hiding the overlay
                   setTimeout(() => setIsSearchFocused(false), 200);
                 }}
               />
             </View>
             <TouchableOpacity
               onPress={() => router.push('/(tabs)/book')}
-              style={{ width: 44, height: 44, backgroundColor: '#BEFF00', borderRadius: 13, alignItems: 'center', justifyContent: 'center' }}
+              style={{ width: 44, height: 44, backgroundColor: theme.accent, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }}
             >
-              <PlusIcon />
+              {/* Note: Ensure PlusIcon supports 'color' prop if it throws an error */}
+              <PlusIcon color={theme.background} /> 
             </TouchableOpacity>
           </View>
 
           {/* Autocomplete Dropdown over the Map */}
           {isSearchFocused && searchQuery.length > 0 && (
-            <View style={styles.autocomplete}>
+            <View style={[styles.autocomplete, { backgroundColor: theme.card, borderColor: theme.border }]}>
               {isSearchLoading ? (
-                <ActivityIndicator size="small" color="#BEFF00" style={{ padding: 20 }} />
+                <ActivityIndicator size="small" color={theme.accent} style={{ padding: 20 }} />
               ) : (
                 <FlatList
                   data={searchResults}
                   keyExtractor={(item) => item.place_id}
                   keyboardShouldPersistTaps="handled"
                   renderItem={({ item }) => (
-                    <TouchableOpacity style={styles.resultRow} onPress={() => handleSelectSearchResult(item)}>
-                      <SearchIcon />
+                    <TouchableOpacity style={[styles.resultRow, { borderBottomColor: theme.border }]} onPress={() => handleSelectSearchResult(item)}>
+                      <SearchIcon color={theme.textSub} />
                       <View style={{ marginLeft: 10, flex: 1 }}>
-                        <Text style={styles.resultName} numberOfLines={1}>{item.name}</Text>
-                        <Text style={styles.resultSub} numberOfLines={1}>{item.address}</Text>
+                        <Text style={[styles.resultName, { color: theme.text }]} numberOfLines={1}>{item.name}</Text>
+                        <Text style={[styles.resultSub, { color: theme.textSub }]} numberOfLines={1}>{item.address}</Text>
                       </View>
                     </TouchableOpacity>
                   )}
@@ -169,7 +173,7 @@ export default function HomeScreen() {
         </View>
 
         {/* ── Live Map Preview Block ── */}
-        <View style={{ marginHorizontal: 14, marginTop: 11, borderRadius: 18, overflow: 'hidden', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', height: 200 }}>
+        <View style={{ marginHorizontal: 14, marginTop: 11, borderRadius: 18, overflow: 'hidden', borderWidth: 0.5, borderColor: theme.border, height: 200 }}>
           <MapView 
             provider={PROVIDER_DEFAULT} 
             style={{ flex: 1 }} 
@@ -187,7 +191,7 @@ export default function HomeScreen() {
                   longitude: driver.longitude,
                 }}
               >
-                <View style={styles.driverPin}>
+                <View style={[styles.driverPin, { backgroundColor: theme.card, borderColor: theme.accent, shadowColor: theme.accent }]}>
                   <Text style={{ fontSize: 12 }}>
                     {driver.ride_type === 'BIKE' ? '🛵' : '🛺'}
                   </Text>
@@ -199,20 +203,20 @@ export default function HomeScreen() {
 
         {/* ── Quick Routes (Dynamic) ── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 4 }}>
-          <Text style={{ fontSize: 14, fontWeight: '700', color: '#EEF0E8', fontFamily: 'Outfit_700Bold', letterSpacing: -0.2 }}>Quick routes</Text>
-          <Text style={{ fontSize: 11, color: '#BEFF00', fontFamily: 'Outfit_600SemiBold' }}>See all</Text>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text, fontFamily: 'Outfit_700Bold', letterSpacing: -0.2 }}>Quick routes</Text>
+          <Text style={{ fontSize: 11, color: theme.accent, fontFamily: 'Outfit_600SemiBold' }}>See all</Text>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 7, paddingBottom: 4 }}>
           {data.quickRoutes.map((r, i) => (
             <TouchableOpacity
               key={i}
               onPress={() => router.push('/(tabs)/book')}
-              style={{ backgroundColor: '#101C12', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 }}
+              style={{ backgroundColor: theme.card, borderWidth: 0.5, borderColor: theme.border, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 }}
             >
-              <Text style={{ fontSize: 11, fontWeight: '700', color: '#CDD0C6', fontFamily: 'Outfit_700Bold' }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.text, fontFamily: 'Outfit_700Bold' }}>
                 {r.from} → {r.to}
               </Text>
-              <Text style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontFamily: 'Outfit_400Regular', marginTop: 2 }}>
+              <Text style={{ fontSize: 10, color: theme.textSub, fontFamily: 'Outfit_400Regular', marginTop: 2 }}>
                 {r.km} km · from ₹{r.from_price}
               </Text>
             </TouchableOpacity>
@@ -221,7 +225,7 @@ export default function HomeScreen() {
 
         {/* ── Vehicle Selection (Dynamic) ── */}
         <View style={{ paddingHorizontal: 18, paddingTop: 14, paddingBottom: 4 }}>
-          <Text style={{ fontSize: 14, fontWeight: '700', color: '#EEF0E8', fontFamily: 'Outfit_700Bold', letterSpacing: -0.2 }}>Choose your ride</Text>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text, fontFamily: 'Outfit_700Bold', letterSpacing: -0.2 }}>Choose your ride</Text>
         </View>
         <View style={{ flexDirection: 'row', gap: 7, paddingHorizontal: 14, paddingBottom: 14 }}>
           {data.vehicles.map((v) => {
@@ -233,22 +237,22 @@ export default function HomeScreen() {
                 onPress={() => setSelectedVehicle(v.id)}
                 style={{
                   flex: 1,
-                  backgroundColor: active ? 'rgba(190,255,0,0.07)' : '#101C12',
+                  backgroundColor: active ? theme.accentSoft : theme.card,
                   borderWidth: 0.5,
-                  borderColor: active ? 'rgba(190,255,0,0.4)' : 'rgba(255,255,255,0.08)',
+                  borderColor: active ? theme.accent : theme.border,
                   borderRadius: 17,
                   paddingVertical: 13,
                   paddingHorizontal: 7,
                   alignItems: 'center',
                 }}
               >
-                {v.id === 'bike'        && <BikeIcon active={active} />}
-                {v.id === 'auto'        && <AutoIcon active={active} />}
-                {v.id === 'shared_auto' && <SharedAutoIcon active={active} />}
-                <Text style={{ fontSize: 15, fontWeight: '800', color: '#EEF0E8', fontFamily: 'Outfit_800ExtraBold', marginTop: 7, letterSpacing: -0.3 }}>
+                {v.id === 'bike'        && <BikeIcon active={active} theme={theme} />}
+                {v.id === 'auto'        && <AutoIcon active={active} theme={theme} />}
+                {v.id === 'shared_auto' && <SharedAutoIcon active={active} theme={theme} />}
+                <Text style={{ fontSize: 15, fontWeight: '800', color: theme.text, fontFamily: 'Outfit_800ExtraBold', marginTop: 7, letterSpacing: -0.3 }}>
                   ₹{v.price}
                 </Text>
-                <Text style={{ fontSize: 10, color: 'rgba(255,255,255,0.38)', fontFamily: 'Outfit_400Regular', marginTop: 2 }}>
+                <Text style={{ fontSize: 10, color: theme.textSub, fontFamily: 'Outfit_400Regular', marginTop: 2 }}>
                   {v.label}
                 </Text>
                 <View style={{ backgroundColor: tag.bg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, marginTop: 5 }}>
@@ -264,12 +268,26 @@ export default function HomeScreen() {
         {/* ── Book Now ── */}
         <TouchableOpacity
           onPress={() => router.push('/(tabs)/book')}
-          style={{ backgroundColor: '#BEFF00', borderRadius: 17, marginHorizontal: 14, marginBottom: 24, paddingVertical: 17, alignItems: 'center' }}
+          style={{ backgroundColor: theme.accent, borderRadius: 17, marginHorizontal: 14, marginBottom: 24, paddingVertical: 17, alignItems: 'center' }}
         >
-          <Text style={{ fontSize: 15, fontWeight: '800', color: '#060A07', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.3 }}>
+          <Text style={{ fontSize: 15, fontWeight: '800', color: theme.background, fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.3 }}>
             Book Now — Just 2 Taps
           </Text>
         </TouchableOpacity>
+
+        {/* ── Ridzo Brand Footer ── */}
+        <View style={styles.brandFooter}>
+          <View style={[styles.brandDivider, { backgroundColor: theme.border }]} />
+          <Text style={[styles.brandWordmark, { color: theme.text }]}>ridzo</Text>
+          <Text style={[styles.brandTagline, { color: theme.textSub }]}>
+            your ride companion,{'\n'}born in Silvassa.
+          </Text>
+          <View style={[styles.brandBadge, { backgroundColor: theme.accentSoft, borderColor: theme.border }]}>
+            <Text style={[styles.brandBadgeText, { color: theme.accent }]}>🌿  made for silvassa, by silvassa</Text>
+          </View>
+          <View style={{ height: 28 }} />
+        </View>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -279,13 +297,10 @@ const styles = StyleSheet.create({
   driverPin: {
     width: 26, 
     height: 26, 
-    backgroundColor: '#101C12', 
     borderRadius: 13, 
     alignItems: 'center', 
     justifyContent: 'center', 
     borderWidth: 1.5, 
-    borderColor: '#BEFF00',
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,
     shadowRadius: 3,
@@ -296,11 +311,9 @@ const styles = StyleSheet.create({
     top: 52, 
     left: 0, 
     right: 52, 
-    backgroundColor: '#101C12', 
     borderRadius: 16, 
     maxHeight: 220, 
     borderWidth: 0.5, 
-    borderColor: 'rgba(255,255,255,0.08)', 
     paddingHorizontal: 6, 
     zIndex: 100, 
     elevation: 10
@@ -311,16 +324,52 @@ const styles = StyleSheet.create({
     paddingVertical: 13, 
     paddingHorizontal: 10, 
     borderBottomWidth: 0.5, 
-    borderBottomColor: 'rgba(255,255,255,0.04)' 
   },
   resultName: { 
-    color: '#EEF0E8', 
     fontSize: 13, 
     fontFamily: 'Outfit_600SemiBold' 
   },
   resultSub: { 
-    color: 'rgba(255,255,255,0.35)', 
     fontSize: 10, 
     marginTop: 2 
+  },
+  brandFooter: {
+    marginTop: 10,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+  },
+  brandDivider: {
+    width: 36,
+    height: 1,
+    borderRadius: 1,
+    marginBottom: 22,
+  },
+  brandWordmark: {
+    fontSize: 52,
+    fontFamily: 'Outfit_800ExtraBold',
+    letterSpacing: -3,
+    opacity: 0.12,
+    textTransform: 'lowercase',
+    lineHeight: 54,
+  },
+  brandTagline: {
+    fontSize: 13,
+    fontFamily: 'Outfit_600SemiBold',
+    textAlign: 'center',
+    letterSpacing: 0.1,
+    lineHeight: 19,
+    marginTop: 6,
+  },
+  brandBadge: {
+    marginTop: 14,
+    borderWidth: 0.5,
+    borderRadius: 30,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  brandBadgeText: {
+    fontSize: 10,
+    fontFamily: 'Outfit_500Medium',
+    letterSpacing: 0.4,
   },
 });

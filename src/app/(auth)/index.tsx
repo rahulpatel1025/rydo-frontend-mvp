@@ -1,12 +1,15 @@
 // src/app/(auth)/index.tsx
-import { View, Text, TouchableOpacity, Image } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Svg, Path } from 'react-native-svg';
+import { useColorScheme } from 'react-native'; // 1. Import Hook
+import { themeConfig } from '../../theme'; // 2. Import Theme
 
 // ── Icons ─────────────────────────────────────────────────────────────────
-const AppleIcon = () => (
-  <Svg width={20} height={20} viewBox="0 0 24 24" fill="#06090A">
+// Pass a dynamic fill color prop to the Apple Icon
+const AppleIcon = ({ fill }: { fill: string }) => (
+  <Svg width={20} height={20} viewBox="0 0 24 24" fill={fill}>
     <Path d="M16.365 21.43c-1.355 1.01-2.695 1.05-3.92.05-1.29-.98-2.58-.96-3.99.04-1.42 1.01-2.63 1.04-3.72-.1-1.07-1.11-2.42-3.8-2.42-7.39 0-3.32 1.48-5.74 3.79-6.9 1.25-.62 2.65-.67 3.9-.12 1.22.54 2.11.58 3.32.05 1.4-.6 2.87-.52 4.1.28 1.43.93 2.37 2.66 2.37 4.54-2.22-.05-3.69 1.34-3.69 3.5 0 2.22 1.5 3.52 3.65 3.56-.63 1.35-1.63 2.82-3.37 4.49zm-4.14-16.14c-.66.82-1.74 1.36-2.86 1.27-.14-1.2.4-2.39 1.1-3.21.68-.8 1.8-1.37 2.86-1.27.15 1.22-.4 2.4-1.1 3.21z" />
   </Svg>
 );
@@ -22,26 +25,28 @@ const GoogleIcon = () => (
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  
+  // 3. Grab the active theme
+  const colorScheme = useColorScheme() || 'dark';
+  const theme = themeConfig[colorScheme];
 
   const handleOAuthLogin = (provider: 'apple' | 'google') => {
-    // TODO: Trigger actual OAuth flow later.
-    // After getting their email, we STILL route them to verify their phone number.
     router.push('/(auth)/phone');
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#06090A' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <View style={{ flex: 1, paddingHorizontal: 24 }}>
         
         {/* ── Hero Section ── */}
         <View style={{ flex: 1, justifyContent: 'center' }}>
-          <Text style={{ fontSize: 42, fontWeight: '900', color: '#BEFF00', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -1.5 }}>
+          <Text style={{ fontSize: 42, fontWeight: '900', color: theme.accent, fontFamily: 'Outfit_800ExtraBold', letterSpacing: -1.5 }}>
             RYDO
           </Text>
-          <Text style={{ fontSize: 24, fontWeight: '700', color: '#EEF0E8', fontFamily: 'Outfit_700Bold', marginTop: 12, letterSpacing: -0.5 }}>
+          <Text style={{ fontSize: 24, fontWeight: '700', color: theme.text, fontFamily: 'Outfit_700Bold', marginTop: 12, letterSpacing: -0.5 }}>
             Your city, unlocked.
           </Text>
-          <Text style={{ fontSize: 15, color: 'rgba(255,255,255,0.4)', fontFamily: 'Outfit_400Regular', marginTop: 8, lineHeight: 22 }}>
+          <Text style={{ fontSize: 15, color: theme.textSub, fontFamily: 'Outfit_400Regular', marginTop: 8, lineHeight: 22 }}>
             Book bikes, autos, and cabs in seconds. Reliable rides at your fingertips.
           </Text>
         </View>
@@ -51,40 +56,41 @@ export default function WelcomeScreen() {
           
           <TouchableOpacity
             onPress={() => handleOAuthLogin('apple')}
-            style={{ backgroundColor: '#EEF0E8', borderRadius: 16, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}
+            // Apple Button magically inverts itself!
+            style={{ backgroundColor: theme.text, borderRadius: 16, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}
           >
-            <AppleIcon />
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#06090A', fontFamily: 'Outfit_700Bold', marginLeft: 10 }}>
+            <AppleIcon fill={theme.background} />
+            <Text style={{ fontSize: 16, fontWeight: '700', color: theme.background, fontFamily: 'Outfit_700Bold', marginLeft: 10 }}>
               Continue with Apple
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             onPress={() => handleOAuthLogin('google')}
-            style={{ backgroundColor: '#101C12', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 16, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 24 }}
+            style={{ backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border, borderRadius: 16, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 24 }}
           >
             <GoogleIcon />
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#EEF0E8', fontFamily: 'Outfit_700Bold', marginLeft: 10 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text, fontFamily: 'Outfit_700Bold', marginLeft: 10 }}>
               Continue with Google
             </Text>
           </TouchableOpacity>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
-            <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
-            <Text style={{ marginHorizontal: 16, fontSize: 12, color: 'rgba(255,255,255,0.3)', fontFamily: 'Outfit_500Medium' }}>or</Text>
-            <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+            <View style={{ flex: 1, height: 1, backgroundColor: theme.border }} />
+            <Text style={{ marginHorizontal: 16, fontSize: 12, color: theme.textSub, fontFamily: 'Outfit_500Medium' }}>or</Text>
+            <View style={{ flex: 1, height: 1, backgroundColor: theme.border }} />
           </View>
 
           <TouchableOpacity
             onPress={() => router.push('/(auth)/phone')}
-            style={{ backgroundColor: 'rgba(190,255,0,0.1)', borderWidth: 1, borderColor: 'rgba(190,255,0,0.2)', borderRadius: 16, paddingVertical: 16, alignItems: 'center' }}
+            style={{ backgroundColor: theme.accentSoft, borderWidth: 1, borderColor: theme.border, borderRadius: 16, paddingVertical: 16, alignItems: 'center' }}
           >
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#BEFF00', fontFamily: 'Outfit_700Bold' }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: theme.accent, fontFamily: 'Outfit_700Bold' }}>
               Continue with Phone Number
             </Text>
           </TouchableOpacity>
 
-          <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', fontFamily: 'Outfit_400Regular', textAlign: 'center', marginTop: 24, lineHeight: 16 }}>
+          <Text style={{ fontSize: 11, color: theme.textSub, fontFamily: 'Outfit_400Regular', textAlign: 'center', marginTop: 24, lineHeight: 16 }}>
             By continuing, you agree to our Terms of Service and Privacy Policy.
           </Text>
 
