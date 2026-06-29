@@ -17,9 +17,11 @@ export const apiClient = axios.create({
 // ── Attach JWT token to every request automatically ───────────────────────────
 apiClient.interceptors.request.use(async (config) => {
   const token = await SecureStore.getItemAsync('userToken');
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
   return config;
 });
 

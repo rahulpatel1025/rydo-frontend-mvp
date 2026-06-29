@@ -1,7 +1,12 @@
 // src/app/(tabs)/_layout.tsx  — Bottom Tab Navigator
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 import { View, Text } from 'react-native';
 import { Svg, Path, Circle, Rect, Line } from 'react-native-svg';
+import { useEffect } from 'react';
+
+// ✨ IMPORTS FOR PUSH NOTIFICATIONS
+import { usePushNotifications } from '../../hooks/usePushNotifications'; // Note: check if folder is 'hook' or 'hooks'
+import { apiClient } from '../../lib/apiClient';
 
 // ── Nav Icons ─────────────────────────────────────────────────────────────────
 const HomeIcon = ({ active }: { active: boolean }) => {
@@ -83,6 +88,32 @@ function TabBar({ state, descriptors, navigation }: any) {
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 export default function TabsLayout() {
+  const router = useRouter();
+  const { expoPushToken, notification } = usePushNotifications();
+
+  // ✨ 1. Sync Push Token to Backend
+  useEffect(() => {
+    if (expoPushToken?.data) {
+      console.log("📱 User Push Token Generated:", expoPushToken.data);
+      apiClient.put('/users/push-token', { 
+        token: expoPushToken.data 
+      }).catch(err => console.log("Failed to sync user push token", err.message));
+    }
+  }, [expoPushToken]);
+
+  // ✨ 2. Global Background Push Notification Listener
+  useEffect(() => {
+    if (notification) {
+      console.log("🚨 USER APP RECEIVED PUSH NOTIFICATION 🚨");
+      const payload: any = notification.request.content.data?.request || notification.request.content.data;
+      
+      // If the driver accepted or arrived, push them to the tracking screen
+      if (payload?.status === 'accepted' || payload?.status === 'driver_arrived' || payload?.type === 'status_update') {
+        router.push('/(tabs)/track');
+      }
+    }
+  }, [notification]);
+
   return (
     <Tabs
       tabBar={(props) => <TabBar {...props} />}

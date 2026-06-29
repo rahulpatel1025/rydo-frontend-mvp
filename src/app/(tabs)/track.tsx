@@ -11,6 +11,7 @@ import { useActiveRide } from '../../features/booking/api/useActiveRide';
 import { apiClient } from '../../lib/apiClient';
 import { getSocket, connectSocket } from '../../lib/socketClient';
 import { useRouteEstimate } from '../../features/booking/api/useRouteEstimate';
+import RidePaymentScreen from '../../features/payments/RidePaymentScreen';
 import { themeConfig } from '../../theme'; // Import your theme dictionary
 
 const customDarkMapStyle = [
@@ -27,7 +28,7 @@ export default function TrackScreen() {
   const mapRef = useRef<MapView>(null);
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useActiveRide();
+  const { data, isLoading, isFetched } = useActiveRide();
 
   // ── Theme Hook ──
   const colorScheme = useColorScheme() || 'dark';
@@ -39,6 +40,8 @@ export default function TrackScreen() {
 
   // 🚨 THROTTLE STATE: Protects your API billing limits
   const [routeDriverCoords, setRouteDriverCoords] = useState<{ latitude: number, longitude: number } | null>(null);
+  const [pendingPayment, setPendingPayment] = useState<{ id: string, passengerId: string, fare: number } | null>(null);
+  const [isUserPanning, setIsUserPanning] = useState(false);
   const latestCoordsRef = useRef<{ latitude: number, longitude: number } | null>(null);
 
   const isNavigatingAwayRef = useRef(false);
@@ -208,7 +211,10 @@ export default function TrackScreen() {
   useEffect(() => {
     if (!data) return;
 
-    if (data.status === 'CANCELLED') {
+    // Note: If the backend handles driver cancellations by keeping the ride alive
+    // and setting it to SEARCHING, this CANCELLED block will not fire. 
+    // This block only fires if the ride is completely permanently dead.
+    if (data.status === 'cancelled') {
       const driverHadAccepted = !!data.driver?.name;
 
       if (driverHadAccepted) {
@@ -229,18 +235,43 @@ export default function TrackScreen() {
       }
     }
 
-    if (data.status === 'COMPLETED') {
+    if (data.status === 'completed') {
+      setPendingPayment({
+        id: data.ride_id ? data.ride_id.toString() : data.id.toString(),
+        passengerId: data.id.toString(),
+        fare: Number((data as any).fareTotal ?? (data as any).fare_total ?? 0),
+      });
+    }
+  }, [data, queryClient, safeNavigateHome]);
+
+  useEffect(() => {
+    if (isFetched && !data && !pendingPayment) {
       queryClient.removeQueries({ queryKey: ['activeRide'] });
       safeNavigateHome();
     }
-  }, [data?.status, data?.driver?.name, queryClient, safeNavigateHome]);
+  }, [isFetched, data, pendingPayment, queryClient, safeNavigateHome]);
 
   // ── Map Animation ──
   useEffect(() => {
-    if (mapRef.current && !isSearching && liveDriverCoords) {
+    if (mapRef.current && !isSearching && liveDriverCoords && !isUserPanning) {
       mapRef.current.animateCamera({ center: liveDriverCoords, zoom: 16 }, { duration: 1000 });
     }
-  }, [isSearching, liveDriverCoords]);
+  }, [isSearching, liveDriverCoords, isUserPanning]);
+
+  if (pendingPayment) {
+    return (
+      <RidePaymentScreen
+        rideId={pendingPayment.id}
+        ridePassengerId={pendingPayment.passengerId}
+        fareAmount={pendingPayment.fare}
+        onPaymentComplete={() => {
+          setPendingPayment(null);
+          queryClient.removeQueries({ queryKey: ['activeRide'] });
+          safeNavigateHome();
+        }}
+      />
+    );
+  }
 
   if (isLoading || !data) {
     return (
@@ -281,6 +312,8 @@ export default function TrackScreen() {
             showsUserLocation={true}
             showsCompass={false}
             pitchEnabled={false}
+            onTouchStart={() => setIsUserPanning(true)}
+            onPanDrag={() => setIsUserPanning(true)}
           >
             {/* 1. Main Trip Route */}
             {hasRoute && (
@@ -329,6 +362,20 @@ export default function TrackScreen() {
           )}
 
           <Text style={[styles.mapOverlayRoute, { backgroundColor: theme.card, color: theme.textSub }]} numberOfLines={1}>{routeString}</Text>
+
+          {isUserPanning && !isSearching && !isBoarded && (
+            <TouchableOpacity 
+              style={[styles.recenterBtn, { backgroundColor: theme.accent }]}
+              onPress={() => {
+                setIsUserPanning(false);
+                if (liveDriverCoords && mapRef.current) {
+                  mapRef.current.animateCamera({ center: liveDriverCoords, zoom: 16 }, { duration: 500 });
+                }
+              }}
+            >
+              <Text style={[styles.recenterBtnText, { color: theme.background }]}>Re-center</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {data.is_rideshare && !isBoarded && (
@@ -349,25 +396,18 @@ export default function TrackScreen() {
             <View>
               <Text style={[styles.statusText, { color: isBoarded ? '#00D4A0' : theme.accent }]}>
                 {isSearching ? 'Finding your captain...' :
-                 isArrived ? 'Captain has arrived' :
+                 isArrived ? 'Captain has arrived — show your PIN' :
                  isBoarded ? 'Heading to destination' : 'Captain is on the way'}
               </Text>
               {!isSearching && (
                 <Text style={[styles.etaText, { color: theme.textSub }]}>
-                  {isBoarded ? `Drop-off in ~${currentEta} min` : 
-                   isArrived ? 'Please board the vehicle' : 
+                  {isBoarded ? `Drop-off in ~${currentEta} min` :
+                   isArrived ? 'Read the PIN below to your captain to start' :
                    `Arriving in ${dynamicEta} min`}
                 </Text>
               )}
             </View>
           </View>
-
-          {!isSearching && !isBoarded && data.otp && (
-            <View style={[styles.otpBox, { backgroundColor: theme.accent }]}>
-              <Text style={[styles.otpLabel, { color: theme.background }]}>PIN</Text>
-              <Text style={[styles.otpValue, { color: theme.background }]}>{data.otp}</Text>
-            </View>
-          )}
         </View>
 
         {isSearching ? (
@@ -378,6 +418,7 @@ export default function TrackScreen() {
           </View>
         ) : (
           <View style={[styles.driverCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            {/* ── Driver identity row ── */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13 }}>
               <View style={[styles.driverAvatar, { backgroundColor: theme.background }]}>
                 <Text style={[styles.driverInitials, { color: theme.accent }]}>{data?.driver?.initials || 'DR'}</Text>
@@ -385,14 +426,19 @@ export default function TrackScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.driverName, { color: theme.text }]}>{data?.driver?.name || 'Your Captain'}</Text>
                 <Text style={[styles.driverSubText, { color: theme.textSub }]}>
-                  {data?.driver?.rating || 5.0} ★ · {data?.driver?.trips || 0} trips · {data?.vehicle || 'Auto'}
+                  {data?.driver?.rating || 5.0} ★ · {data?.driver?.trips || 0} trips
+                </Text>
+                <Text style={[styles.driverVehicle, { color: theme.textSub }]}>
+                  {data?.vehicle || 'Auto'}
                 </Text>
               </View>
               <View style={[styles.plateBox, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                <Text style={[styles.plateText, { color: theme.accent }]}>{data?.driver?.plate || 'MH-12'}</Text>
+                <Text style={[styles.plateLabel, { color: theme.textSub }]}>PLATE</Text>
+                <Text style={[styles.plateText, { color: theme.accent }]}>{data?.driver?.plate || '—'}</Text>
               </View>
             </View>
 
+            {/* ── Stats row ── */}
             <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
               {[
                 { value: data?.driver?.rating?.toString() || '5.0', label: 'Rating' },
@@ -407,6 +453,29 @@ export default function TrackScreen() {
             </View>
           </View>
         )}
+
+        {/* ── Start PIN Badge — shown only when driver has arrived ── */}
+        {isArrived && data?.otp ? (
+          <View style={[styles.pinBadge, { backgroundColor: theme.card, borderColor: theme.accent }]}>
+            <Text style={[styles.pinBadgeHelper, { color: theme.textSub }]}>📍 Read this PIN to your captain to start the trip</Text>
+            <View style={styles.pinDigitsRow}>
+              {data.otp.split('').map((digit, i) => (
+                <View key={i} style={[styles.pinDigitBox, { backgroundColor: theme.background, borderColor: theme.accent }]}>
+                  <Text style={[styles.pinDigit, { color: theme.accent }]}>{digit}</Text>
+                </View>
+              ))}
+            </View>
+            <Text style={[styles.pinBadgeNote, { color: theme.textSub }]}>Expires once your trip begins</Text>
+          </View>
+        ) : !isSearching && !isBoarded && data?.otp ? (
+          // Accepted state — show a smaller, less urgent hint
+          <View style={[styles.pinHint, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.pinHintText, { color: theme.textSub }]}>
+              🔒 Your start PIN is ready — share it with your captain when they arrive
+            </Text>
+            <Text style={[styles.pinHintValue, { color: theme.accent }]}>{data.otp}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.actionRow}>
           <TouchableOpacity
@@ -463,6 +532,8 @@ const styles = StyleSheet.create({
   mapOverlayPill: { position: 'absolute', top: '50%', left: '50%', marginLeft: -40, marginTop: -20, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, borderWidth: 1 },
   mapOverlayText: { fontSize: 11, fontWeight: '700', fontFamily: 'Outfit_700Bold' },
   mapOverlayRoute: { position: 'absolute', bottom: 10, left: 14, right: 14, fontSize: 10, fontFamily: 'Outfit_500Medium', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  recenterBtn: { position: 'absolute', top: 10, right: 10, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
+  recenterBtnText: { fontSize: 11, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold' },
 
   sharedBanner: { marginHorizontal: 14, marginBottom: 10, backgroundColor: 'rgba(255,165,0,0.1)', borderWidth: 0.5, borderColor: 'rgba(255,165,0,0.3)', borderRadius: 12, padding: 12 },
   sharedBannerText: { color: 'rgba(255,200,100,0.9)', fontSize: 12, fontFamily: 'Outfit_500Medium', lineHeight: 18 },
@@ -470,9 +541,6 @@ const styles = StyleSheet.create({
   statusDot: { width: 8, height: 8, borderRadius: 4, marginTop: 2 },
   statusText: { fontSize: 14, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.2 },
   etaText: { fontSize: 11, fontFamily: 'Outfit_500Medium', marginTop: 2 },
-  otpBox: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, alignItems: 'center' },
-  otpLabel: { fontSize: 9, fontFamily: 'Outfit_700Bold', letterSpacing: 1 },
-  otpValue: { fontSize: 16, fontWeight: '900', fontFamily: 'Outfit_800ExtraBold', letterSpacing: 2, marginTop: -2 },
 
   searchingCard: { marginHorizontal: 14, borderRadius: 19, borderWidth: 0.5, padding: 24, alignItems: 'center', justifyContent: 'center' },
   searchingTitle: { fontSize: 18, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold', marginBottom: 4 },
@@ -483,11 +551,26 @@ const styles = StyleSheet.create({
   driverInitials: { fontSize: 19, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold' },
   driverName: { fontSize: 15, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold', letterSpacing: -0.3 },
   driverSubText: { fontSize: 11, fontFamily: 'Outfit_400Regular', marginTop: 2 },
-  plateBox: { borderWidth: 0.5, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 5 },
+  driverVehicle: { fontSize: 11, fontFamily: 'Outfit_600SemiBold', marginTop: 1 },
+  plateBox: { borderWidth: 0.5, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, alignItems: 'center', minWidth: 64 },
+  plateLabel: { fontSize: 8, fontFamily: 'Outfit_700Bold', letterSpacing: 1, marginBottom: 2 },
   plateText: { fontSize: 12, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold', letterSpacing: 1 },
   statsRow: { flexDirection: 'row', marginTop: 14, paddingTop: 13, borderTopWidth: 0.5 },
   statValue: { fontSize: 14, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold' },
   statLabel: { fontSize: 10, fontFamily: 'Outfit_400Regular', marginTop: 2 },
+
+  // ── Start PIN badge (driver arrived state) ──
+  pinBadge: { marginHorizontal: 14, marginTop: 10, borderRadius: 20, borderWidth: 1.5, padding: 20, alignItems: 'center' },
+  pinBadgeHelper: { fontSize: 12, fontFamily: 'Outfit_500Medium', textAlign: 'center', marginBottom: 16, lineHeight: 18 },
+  pinDigitsRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  pinDigitBox: { width: 54, height: 64, borderRadius: 14, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  pinDigit: { fontSize: 34, fontWeight: '900', fontFamily: 'Outfit_800ExtraBold' },
+  pinBadgeNote: { fontSize: 10, fontFamily: 'Outfit_400Regular' },
+
+  // ── Start PIN hint (driver accepted / approaching state) ──
+  pinHint: { marginHorizontal: 14, marginTop: 10, borderRadius: 14, borderWidth: 0.5, paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pinHintText: { fontSize: 11, fontFamily: 'Outfit_400Regular', flex: 1, lineHeight: 16 },
+  pinHintValue: { fontSize: 20, fontWeight: '900', fontFamily: 'Outfit_800ExtraBold', marginLeft: 12, letterSpacing: 3 },
   actionRow: { flexDirection: 'row', gap: 7, marginHorizontal: 14, marginTop: 9 },
   callBtn: { flex: 1, borderRadius: 15, padding: 14, alignItems: 'center' },
   callBtnText: { fontSize: 13, fontWeight: '800', fontFamily: 'Outfit_800ExtraBold' },

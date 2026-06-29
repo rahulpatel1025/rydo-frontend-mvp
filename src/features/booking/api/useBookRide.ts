@@ -36,7 +36,7 @@ export function useBookRide() {
         const socket = await connectSocket();
         
         // Extract the new ride ID (Adjust 'data.id' if your backend nests it, e.g., 'data.data.id')
-        const newRideId = data?.data?.id || data?.id; 
+       const newRideId = data?.data?.ride_id || data?.ride_id;
         
         if (newRideId) {
           socket.emit('rider:join-ride', { ride_id: newRideId });

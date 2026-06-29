@@ -2,15 +2,16 @@ import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../../../lib/apiClient';
 
 export type PassengerStatus =
-  | 'SEARCHING'
-  | 'ACCEPTED'
-  | 'ARRIVED'
-  | 'BOARDED'
-  | 'COMPLETED'
-  | 'CANCELLED';
+  | 'searching'
+  | 'accepted'
+  | 'arrived'
+  | 'boarded'
+  | 'completed'
+  | 'cancelled';
 
 export interface ActiveRideData {
   id: string;
+  ride_id?: string | number; // ✨ Added ride_id to fix the track.tsx TypeScript error
   status: PassengerStatus;
   status_text: string;
   eta_minutes: number;
@@ -44,7 +45,7 @@ export function useActiveRide() {
     queryFn: async (): Promise<ActiveRideData | null> => {
       try {
         const res = await apiClient.get('/users/rides/current');
-        return res.data?.data || res.data;
+        return res.data && 'data' in res.data ? res.data.data : res.data;
       } catch (error: any) {
         if (error.response?.status === 404) return null;
         throw error;

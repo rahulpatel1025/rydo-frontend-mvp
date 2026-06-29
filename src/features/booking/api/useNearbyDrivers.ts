@@ -3,6 +3,7 @@ import { apiClient } from '@/lib/apiClient';
 
 export interface NearbyDriver {
   driver_id: number;
+  driverId?: number;
   latitude: number;
   longitude: number;
   ride_type: 'BIKE' | 'AUTO' | 'SHARED_AUTO';
@@ -58,13 +59,16 @@ export function useNearbyDrivers(
           .map((driver: any) => {
             const latitude =
               driver.latitude ??
+              driver.lat ??
               driver.location?.lat;
 
             const longitude =
               driver.longitude ??
+              driver.lng ??
               driver.location?.lng;
 
             const driverId =
+              driver.driverId ??
               driver.driver_id ??
               driver.id ??
               driver.account_id;
@@ -83,6 +87,7 @@ export function useNearbyDrivers(
               longitude: Number(longitude),
               ride_type:
                 driver.ride_type ??
+                driver.vehicleType ??
                 driver.vehicle_info?.type?.toUpperCase() ??
                 'BIKE',
 

@@ -42,7 +42,21 @@
         {
           "locationWhenInUsePermission": "Rydo needs your location to show you on the map and find nearby rides."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#BEFF00"
+        }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c9203345-6968-4813-bede-76c4c34577bf"
+      }
+    },
+    "owner": "rahulpatel007"
   }
 }
